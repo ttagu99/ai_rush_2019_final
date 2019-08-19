@@ -1,0 +1,23 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 16
+VisualStudioVersion = 16.0.28803.156
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{888888A0-9F3D-457C-B088-3A5042F75D52}") = "ai_rush_2019_final", "ai_rush_2019_final.pyproj", "{B62DFCAF-0E54-4CBB-AE1B-FB953A488708}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{B62DFCAF-0E54-4CBB-AE1B-FB953A488708}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{B62DFCAF-0E54-4CBB-AE1B-FB953A488708}.Release|Any CPU.ActiveCfg = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {C2339B3A-6205-483C-A92B-69D0C7C6601D}
+	EndGlobalSection
+EndGlobal
