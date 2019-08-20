@@ -31,7 +31,7 @@ class AIRUSH2dataset(Dataset):
                  args,
                  transform=None,
                  mapping=None,
-                 mode='dummy'):
+                 mode='dummy', EDA=False):
 
         """
         Args:
@@ -52,21 +52,26 @@ class AIRUSH2dataset(Dataset):
                                         'age_range': str,
                                         'read_article_ids': str
                                     }, sep='\t')
+            if EDA==True:
+                print(self.item.head(10))
             label_data_path = os.path.join(DATASET_PATH, 'train',
                                            os.path.basename(os.path.normpath(csv_file)).split('_')[0] + '_label')
             self.label = pd.read_csv(label_data_path,
                                      dtype={'label': int},
                                      sep='\t')
 
-            if nsml.IS_ON_NSML:
-                with open(os.path.join(DATASET_PATH, 'train', 'train_data', 'train_image_features.pkl'),
-                          'rb') as handle:
-                    self.image_feature_dict = pickle.load(handle)
-            else:
-                # on local machine
-                with open(os.path.join(DATASET_PATH, 'train', 'train_data', 'train_image_features.pkl'),
-                          'rb') as handle:
-                    self.image_feature_dict = pickle.load(handle)
+            if EDA==True:
+                print(self.label.head(10))
+
+            #if nsml.IS_ON_NSML:
+            #    with open(os.path.join(DATASET_PATH, 'train', 'train_data', 'train_image_features.pkl'),
+            #              'rb') as handle:
+            #        self.image_feature_dict = pickle.load(handle)
+            #else:
+            #    # on local machine
+            with open(os.path.join(DATASET_PATH, 'train', 'train_data', 'train_image_features.pkl'),
+                        'rb') as handle:
+                self.image_feature_dict = pickle.load(handle)
 
         else:
             csv_file = os.path.join(csv_file, 'test', 'test_data', 'test_data')
@@ -78,16 +83,18 @@ class AIRUSH2dataset(Dataset):
                                         'age_range': str,
                                         'read_article_ids': str
                                     }, sep='\t')
+            if EDA==True:
+                print(self.item.head(10))
 
-            if nsml.IS_ON_NSML:
-                with open(os.path.join(DATASET_PATH, 'test', 'test_data', 'test_image_features.pkl'),
-                          'rb') as handle:
-                    self.image_feature_dict = pickle.load(handle)
-            else:
-                # on local machine
-                with open(os.path.join(DATASET_PATH, 'test', 'test_data', 'test_image_features.pkl'),
-                          'rb') as handle:
-                    self.image_feature_dict = pickle.load(handle)
+            #if nsml.IS_ON_NSML:
+            #    with open(os.path.join(DATASET_PATH, 'test', 'test_data', 'test_image_features.pkl'),
+            #              'rb') as handle:
+            #        self.image_feature_dict = pickle.load(handle)
+            #else:
+            #    # on local machine
+            with open(os.path.join(DATASET_PATH, 'test', 'test_data', 'test_image_features.pkl'),
+                        'rb') as handle:
+                self.image_feature_dict = pickle.load(handle)
 
         self.map = []
         self.mode = mode

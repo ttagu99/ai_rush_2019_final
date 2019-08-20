@@ -12,6 +12,7 @@
     <OutputPath>.</OutputPath>
     <Name>ai_rush_2019_final</Name>
     <RootNamespace>ai_rush_2019_final</RootNamespace>
+    <SuppressEnvironmentCreationPrompt>True</SuppressEnvironmentCreationPrompt>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)' == 'Debug' ">
     <DebugSymbols>true</DebugSymbols>

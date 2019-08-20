@@ -214,14 +214,25 @@ def main(args):
                 if loss < best_loss:
                     nsml.save('best_loss')  # this will save your best model on nsml.
 
+
+
                 if i % args.print_every == 0:
                     elapsed = datetime.datetime.now() - start_time
                     print('Elapsed [%s], Epoch [%i/%i], Step [%i/%i], Loss: %.4f'
                           % (elapsed, epoch + 1, args.num_epochs, i + 1, iter_per_epoch, loss.item()))
-                if i % args.save_step_every == 0:
-                    # print('debug ] save testing purpose')
-                    nsml.save('step_' + str(i))  # this will save your current model on nsml.
+                #if i % args.save_step_every == 0:
+                #    # print('debug ] save testing purpose')
+                #    nsml.save('step_' + str(i))  # this will save your current model on nsml.
+
             if epoch % args.save_epoch_every == 0:
+                nsml.report(
+                    summary=True,
+                    step=epoch,
+                    scope=locals(),
+                    **{
+                    "Loss": loss.item(),
+                    })
+
                 nsml.save('epoch_' + str(epoch))  # this will save your current model on nsml.
     nsml.save('final')
 
@@ -240,24 +251,24 @@ if __name__ == '__main__':
     parser.add_argument('--use_exposed_time', type=bool, default=True)
     parser.add_argument('--use_read_history', type=bool, default=False)
 
-    parser.add_argument('--num_epochs', type=int, default=1)
-    parser.add_argument('--batch_size', type=int, default=2048)
+    parser.add_argument('--num_epochs', type=int, default=10)#1)
+    parser.add_argument('--batch_size', type=int, default=350)#2048)
     parser.add_argument('--num_classes', type=int, default=1)
     parser.add_argument('--task', type=str, default='ctrpred')
     parser.add_argument('--lr', type=float, default=1e-3)
     parser.add_argument('--print_every', type=int, default=10)
-    parser.add_argument('--save_epoch_every', type=int, default=2)
-    parser.add_argument('--save_step_every', type=int, default=1000)
+    parser.add_argument('--save_epoch_every', type=int, default=1)
+    parser.add_argument('--save_step_every', type=int, default=1000)#)1000)
 
     parser.add_argument('--use_gpu', type=bool, default=True)
-    parser.add_argument("--arch", type=str, default="MLP")
+    parser.add_argument("--arch", type=str, default="Resnet")#"MLP")#"Resnet")
 
     # reserved for nsml
     parser.add_argument("--mode", type=str, default="train")
     parser.add_argument("--iteration", type=str, default='0')
     parser.add_argument("--pause", type=int, default=0)
 
-    parser.add_argument('--dry_run', type=bool, default=False)
+    parser.add_argument('--dry_run', type=bool, default=False)#True)#False)
 
     config = parser.parse_args()
     main(config)
