@@ -26,6 +26,9 @@
     <Compile Include="data_loader.py" />
     <Compile Include="data_local_loader.py" />
     <Compile Include="evaluation.py" />
+    <Compile Include="keras_main.py">
+      <SubType>Code</SubType>
+    </Compile>
     <Compile Include="main.py" />
     <Compile Include="Resnet_feature_extractor.py" />
     <Compile Include="setup.py" />
