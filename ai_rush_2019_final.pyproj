@@ -25,6 +25,9 @@
   <ItemGroup>
     <Compile Include="data_loader.py" />
     <Compile Include="data_local_loader.py" />
+    <Compile Include="data_local_loader_keras.py">
+      <SubType>Code</SubType>
+    </Compile>
     <Compile Include="evaluation.py" />
     <Compile Include="keras_main.py">
       <SubType>Code</SubType>

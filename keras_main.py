@@ -1,8 +1,8 @@
-from data_local_loader import get_data_loader
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-import torchvision.models as models
+from data_local_loader_keras import get_data_loader
+#import torch
+#import torch.nn as nn
+#import torch.nn.functional as F
+#import torchvision.models as models
 import os
 import argparse
 import numpy as np
@@ -13,6 +13,28 @@ from data_loader import feed_infer
 from evaluation import evaluation_metrics
 import nsml
 import keras
+from keras.models import Sequential
+from keras.layers import Concatenate
+from keras.layers import Dense, Dropout, Flatten, Activation,Average
+from keras.layers import Conv2D, MaxPooling2D, GlobalAveragePooling2D, BatchNormalization,Input
+from keras.callbacks import ReduceLROnPlateau, EarlyStopping, ModelCheckpoint
+from keras import backend as K
+from keras.applications.xception import Xception
+from keras.applications.densenet import DenseNet121, DenseNet169, DenseNet201
+from keras.applications.nasnet import NASNetMobile
+from keras.applications.resnet50 import ResNet50
+from keras.applications.nasnet import NASNetLarge
+from keras.applications.mobilenetv2 import MobileNetV2
+from keras.applications.inception_resnet_v2 import InceptionResNetV2
+from keras.models import Model,load_model
+from keras.optimizers import Adam, SGD
+from sklearn.model_selection import train_test_split
+#import imgaug as ia
+#from imgaug import augmenters as iaa
+#import lightgbm as lgb
+from sklearn.externals import joblib
+from lightgbm import LGBMClassifier
+
 
 # expected to be a difficult problem
 # Gives other meta data (gender age, etc.) but it's hard to predict click through rate
@@ -26,116 +48,80 @@ import keras
 # You can also try to change the training data set itself. Because it deals with very imbalanced problems.
 # Refactor to summarize from existing experiment code.
 
-
 DATASET_PATH = os.path.join(nsml.DATASET_PATH)
 print('start using nsml...!')
 print('DATASET_PATH: ', DATASET_PATH)
 use_nsml = True
 
-# example model and code
-class CTRResNet_CAT(models.ResNet):
-    def __init__(self, block, layers, num_classes=1):
-        super().__init__(block, layers, num_classes=num_classes)
-        self.conv1 = nn.Conv2d(in_channels=3, out_channels=64, kernel_size=7, stride=2, padding=3)
-        self.avgpool = nn.AdaptiveAvgPool2d(output_size=1)
-
-        self.classifier = nn.Sequential(
-            nn.Linear(547, 4096),
-            nn.ReLU(True),
-            nn.Dropout(),
-            nn.Linear(4096, 4096),
-            nn.ReLU(True),
-            nn.Dropout(),
-            nn.Linear(4096, num_classes),
-        )
-
-    def forward(self, x, flat_features):
-        x = self.conv1(x)
-        x = self.bn1(x)
-        x = self.relu(x)
-        x = self.maxpool(x)
-
-        x = self.layer1(x)
-        x = self.layer2(x)
-        x = self.layer3(x)
-        x = self.layer4(x)
-
-        x = self.avgpool(x)
-        # concat, hint: how you are going to fuse these features..?
-        x = x.view(x.size(0), -1)
-        x = torch.cat((x, flat_features), 1)
-
-        x = self.classifier(x)
-        return x
-
-
-def get_resnet18(num_classes):
-    return CTRResNet_CAT(models.resnet.BasicBlock, [2, 2, 2, 2], num_classes=num_classes)
-
-
-def bind_nsml(model, optimizer, task):
-    def save(dir_name, *args, **kwargs):
+def bind_nsml(cnn_model,gbm_model):
+    def save(dir_name):
         os.makedirs(dir_name, exist_ok=True)
-        state = {
-            'model': model.state_dict(),
-            'optimizer': optimizer.state_dict()
-        }
-        torch.save(state, os.path.join(dir_name, 'model.ckpt'))
-        print('saved model checkpoints...!')
+        cnn_model.save_weights(os.path.join(dir_name, 'cnn_model.h5'))
+        print('cnn_model saved!', os.path.join(dir_name, 'cnn_model.h5'))
+        joblib.dump(gbm_model,  os.path.join(dir_name, 'gbm_model.pkl'))
+        print('gbm_model saved!', os.path.join(dir_name, 'gbm_model.pkl'))
 
-    def load(dir_name, *args, **kwargs):
-        state = torch.load(os.path.join(dir_name, 'model.ckpt'))
-        model.load_state_dict(state['model'])
-        optimizer.load_state_dict(state['optimizer'])
+    def load(dir_name):
+        cnn_model.load_weights(os.path.join(dir_name, 'cnn_model.h5'))
+        print('cnn_model loaded!', os.path.join(dir_name, 'cnn_model.h5'))
+        gbm_model = joblib.load( os.path.join(dir_name, 'gbm_model.pkl'))
+        print('gbm_model loaded!',  os.path.join(dir_name, 'gbm_model.pkl'))
         print('loaded model checkpoints...!')
 
-    def infer(root, phase):
-        return _infer(root, phase, model=model, task=task)
+    def infer(root):
+        pass
 
     nsml.bind(save=save, load=load, infer=infer)
+    print('bind_nsml(cnn_model,gbm_model)')
 
 
 def _infer(root, phase, model, task):
+    pass
     # root : csv file path
-    print('_infer root - : ', root)
-    with torch.no_grad():
-        model.eval()
-        test_loader, dataset_sizes = get_data_loader(root, phase)
-        y_pred = []
-        print('start infer')
-        for i, data in enumerate(test_loader):
-            images, extracted_image_features, labels, flat_features = data
+    #print('_infer root - : ', root)
+    #with torch.no_grad():
+    #    model.eval()
+    #    test_loader, dataset_sizes = get_data_loader(root, phase)
+    #    y_pred = []
+    #    print('start infer')
+    #    for i, data in enumerate(test_loader):
+    #        images, extracted_image_features, labels, flat_features = data
 
-            # images = images.cuda()
-            extracted_image_features = extracted_image_features.cuda()
-            flat_features = flat_features.cuda()
-            # labels = labels.cuda()
+    #        # images = images.cuda()
+    #        extracted_image_features = extracted_image_features.cuda()
+    #        flat_features = flat_features.cuda()
+    #        # labels = labels.cuda()
 
-            logits = model(extracted_image_features, flat_features)
-            y_pred += logits.cpu().squeeze().numpy().tolist()
+    #        logits = model(extracted_image_features, flat_features)
+    #        y_pred += logits.cpu().squeeze().numpy().tolist()
 
-        print('end infer')
-    return y_pred
+    #    print('end infer')
+    #return y_pred
 
 
-def main(args):
-    if args.arch == 'MLP':
-        model = get_mlp(num_classes=args.num_classes)
-    elif args.arch == 'Resnet':
-        model = get_resnet18(num_classes=args.num_classes)
+def build_cnn_model(backbone= MobileNetV2, input_shape =  (224,224,3), use_imagenet = 'imagenet', base_freeze=True):
+    base_model = backbone(input_shape=input_shape, weights=use_imagenet, include_top= False)#, classes=NCATS)
+    x = base_model.output
+    gap_x = GlobalAveragePooling2D()(x)
+    #predict = Dense(num_classes, activation='softmax', name='last_softmax')(x)
+    model = Model(inputs=base_model.input, outputs=gap_x)
+    if base_freeze==True:
+        for layer in base_model.layers:
+            layer.trainable = False
+    #model.compile(loss='categorical_crossentropy',   optimizer=opt,  metrics=['accuracy'])
+    print('build_cnn_model')
+    return model
 
-    if args.use_gpu:
-        model = model.cuda()
-    else:
-        model = model.cpu()
-    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
+def main(args):   
+    cnn_model = build_cnn_model(backbone=MobileNetV2, use_imagenet = None)
+    gbm_model = LGBMClassifier(objective='binary', random_state=777)
 
     if use_nsml:
-        bind_nsml(model, optimizer, args.task)
+        bind_nsml(cnn_model, gbm_model)
     if args.pause:
         nsml.paused(scope=locals())
 
-    if (args.mode == 'train') or args.dry_run:
+    if (args.mode == 'train'):
         train_loader, dataset_sizes = get_data_loader(
             root=os.path.join(DATASET_PATH, 'train', 'train_data', 'train_data'),
             phase='train',
@@ -143,12 +129,12 @@ def main(args):
 
         start_time = datetime.datetime.now()
         iter_per_epoch = len(train_loader)
-        best_loss = 1000
-        if args.dry_run:
-            print('start dry-running...!')
-            args.num_epochs = 1
-        else:
-            print('start training...!')
+        #best_loss = 1000
+        #if args.dry_run:
+        #    print('start dry-running...!')
+        #    args.num_epochs = 1
+        #else:
+        #    print('start training...!')
 
         for epoch in range(args.num_epochs):
             for i, data in enumerate(train_loader):

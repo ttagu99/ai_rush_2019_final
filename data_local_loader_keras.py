@@ -1,17 +1,26 @@
 import pickle
 
-import torch
-from torch.utils.data import DataLoader
-from torch.utils.data import Dataset
-from torchvision.transforms import ToTensor
+#import torch
+#from torch.utils.data import DataLoader
+#from torch.utils.data import Dataset
+#from torchvision.transforms import ToTensor
 import os
 from PIL import Image
 import numpy as np
 import pandas as pd
 import nsml
+import keras
 
 from utils import get_transforms
 from utils import default_loader
+from collections import Counter
+import operator
+
+
+def get_item_count_max(atricles, top_num = 3):
+    result = Counter(atricles)
+    result = sorted(result.items(), key=operator.itemgetter(1))
+    
 
 if not nsml.IS_ON_NSML:
     # if you want to run it on your local machine, then put your path here
@@ -24,14 +33,15 @@ else:
     print('DATASET_PATH: ', DATASET_PATH)
 
 
-class AIRUSH2dataset(Dataset):
+
+class AIRUSH2dataset(keras.utils.Sequence):
     def __init__(self,
                  csv_file,
                  root_dir,
                  args,
                  transform=None,
                  mapping=None,
-                 mode='dummy'):
+                 mode='dummy',shuffle=False, history_max_view=10):
 
         """
         Args:
@@ -44,6 +54,7 @@ class AIRUSH2dataset(Dataset):
                 cross validation.
             mode (string): 'train' or 'valid' or 'test'
         """
+        self.shuffle = shuffle
         if args['mode']== 'train':
             self.item = pd.read_csv(csv_file,
                                     dtype={
@@ -52,13 +63,7 @@ class AIRUSH2dataset(Dataset):
                                         'age_range': str,
                                         'read_article_ids': str
                                     }, sep='\t')
-
-            print('train item csv')
-            for c in self.item.columns:
-                print(c)
-                print(self.item[c].head(10))
-
-            #max_article = 0
+            #max_article = 0 #2427
             #for idx in range(self.item.shape[0]):
             #    cur_article = self.item['read_article_ids'].loc[idx]
             #    if type(cur_article) == str:
@@ -75,27 +80,16 @@ class AIRUSH2dataset(Dataset):
             self.label = pd.read_csv(label_data_path,
                                      dtype={'label': int},
                                      sep='\t')
-            print('train label cvsv')
+            print('train label csv')
             print(self.label.head(10))
 
-            if nsml.IS_ON_NSML:
-                with open(os.path.join(DATASET_PATH, 'train', 'train_data', 'train_image_features.pkl'),
-                          'rb') as handle:
-                    self.image_feature_dict = pickle.load(handle)
-
-                    print('train image feature dict')
-                    print('feature dict len', len(self.image_feature_dict.items()))
-                    #for k,v in self.image_feature_dict.items():
-                    #    print(k, v.shape) #(2048,)
-            else:
-                # on local machine
-                with open(os.path.join(DATASET_PATH, 'train', 'train_data', 'train_image_features.pkl'),
-                          'rb') as handle:
-                    self.image_feature_dict = pickle.load(handle)
+            with open(os.path.join(DATASET_PATH, 'train', 'train_data', 'train_image_features.pkl'),'rb') as handle:
+                self.image_feature_dict = pickle.load(handle)
+                print('train image feature dict')
+                print('feature dict len', len(self.image_feature_dict.items()))
 
         else:
             csv_file = os.path.join(csv_file, 'test', 'test_data', 'test_data')
-
             self.item = pd.read_csv(csv_file,
                                     dtype={
                                         'article_id': str,
@@ -104,15 +98,29 @@ class AIRUSH2dataset(Dataset):
                                         'read_article_ids': str
                                     }, sep='\t')
 
-            if nsml.IS_ON_NSML:
-                with open(os.path.join(DATASET_PATH, 'test', 'test_data', 'test_image_features.pkl'),
-                          'rb') as handle:
-                    self.image_feature_dict = pickle.load(handle)
+            with open(os.path.join(DATASET_PATH, 'test', 'test_data', 'test_image_features.pkl'), 'rb') as handle:
+                self.image_feature_dict = pickle.load(handle)
+
+        print('count history')
+        history_num = []
+        log_num = 10000
+        for idx in range(self.item.shape[0]):
+            if(idx%log_num==0):
+                print('count process',idx, '/',self.item.shape[0])
+            cur_article = self.item['read_article_ids'].loc[idx]
+            if type(cur_article) == str:
+                 list_article = cur_article.split(',')
             else:
-                # on local machine
-                with open(os.path.join(DATASET_PATH, 'test', 'test_data', 'test_image_features.pkl'),
-                          'rb') as handle:
-                    self.image_feature_dict = pickle.load(handle)
+                list_article = []
+            history_num.append(len(list_article))
+            get_item_count_max(list_article)
+
+
+        self.item['history_num'] = pd.Series(history_num, index=self.item.index)
+        print('self.item print')
+        for c in self.item.columns:
+            print(c)
+            print(self.item[c].head(10))
 
         self.map = []
         self.mode = mode
@@ -131,9 +139,7 @@ class AIRUSH2dataset(Dataset):
         return len(self.item)
 
     def __getitem__(self, idx):
-        article_id, hh, gender, age_range, read_article_ids = \
-            self.item.loc[idx, ['article_id', 'hh', 'gender', 'age_range', 'read_article_ids']]
-
+        article_id, hh, gender, age_range, read_article_ids = self.item.loc[idx, ['article_id', 'hh', 'gender', 'age_range', 'read_article_ids']]
         if self.args['mode'] == 'train':
             label = self.label.loc[idx, ['label']]
             label = np.array(label, dtype=np.float32)
@@ -141,23 +147,15 @@ class AIRUSH2dataset(Dataset):
             # pseudo label for test mode
             label = np.array(0, dtype=np.float32)
 
-        if nsml.IS_ON_NSML:
-            if self.args['mode'] == 'train':
-                img_name = os.path.join(self.root_dir, article_id + '.jpg')
-            else:  # test, infer
-                img_name = os.path.join(self.root_dir, article_id + '.jpg')
-        else:
-            # on local machine
-            if self.args['mode'] == 'train':
-                img_name = os.path.join(DATASET_PATH, 'train/train_data/train_image/', article_id + '.jpg')
-            else:
-                img_name = os.path.join(DATASET_PATH, 'test/test_data/test_image/', article_id + '.jpg')
+        img_name = os.path.join(self.root_dir, article_id + '.jpg')
 
-        image = default_loader(img_name)
+
+        #image = default_loader(img_name)
+
         extracted_image_feature = self.image_feature_dict[article_id]
 
-        if self.transform:
-            image = self.transform['train'](image)
+        #if self.transform:
+        #    image = self.transform['train'](image)
 
         # Additional info for feeding FC layer
         flat_features = []
@@ -192,6 +190,27 @@ class AIRUSH2dataset(Dataset):
         # hint: if it is not what you wanted, then change the last return line
         return image, extracted_image_feature, label, flat_features
 
+    def on_epoch_end(self):
+        'Updates indexes after each epoch'
+        self.indexes = np.arange(len(self.list_IDs))
+        if self.shuffle == True:
+            np.random.shuffle(self.indexes)
+
+    def __data_generation(self, list_IDs_temp):
+        'Generates data containing batch_size samples' # X : (n_samples, *dim, n_channels)
+        # Initialization
+        X = np.empty((self.batch_size, *self.dim, self.n_channels))
+        y = np.empty((self.batch_size), dtype=int)
+
+        # Generate data
+        for i, ID in enumerate(list_IDs_temp):
+            # Store sample
+            X[i,] = np.load('data/' + ID + '.npy')
+
+            # Store class
+            y[i] = self.labels[ID]
+
+        return X, keras.utils.to_categorical(y, num_classes=self.n_classes)
 
 def my_collate(batch):
     from torch.utils.data.dataloader import default_collate

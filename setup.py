@@ -7,6 +7,7 @@ setup(
     install_requires=[
             'tqdm',
             'torch>=1.0',
+            'lightgbm',
             #'pickle-mixin',
             #'torchvision',
             #'pandas>=0.24.0',
