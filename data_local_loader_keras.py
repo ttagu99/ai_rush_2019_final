@@ -17,9 +17,11 @@ from collections import Counter
 import operator
 
 
-def get_item_count_max(atricles, top_num = 3):
-    result = Counter(atricles)
-    result = sorted(result.items(), key=operator.itemgetter(1))
+#def get_item_count_max(atricles, top_num = 3):
+#    result = Counter(atricles)
+#    result = sorted(result.items(), key=operator.itemgetter(1),reverse=True)
+#    if len(result)>0 and result[0][1]>1:
+#        print('duplicate:',result[0])
     
 
 if not nsml.IS_ON_NSML:
@@ -83,6 +85,12 @@ class AIRUSH2dataset(keras.utils.Sequence):
             print('train label csv')
             print(self.label.head(10))
 
+            isdebug = True
+            if isdebug ==True:
+                self.item = self.item[:1000]
+                self.label = self.label[:1000]
+
+            # history에 있는 image가 모두 extract 되어있지 않음. 내일 여기에서 추출 후 저장 하는거부터 작업 필요.
             with open(os.path.join(DATASET_PATH, 'train', 'train_data', 'train_image_features.pkl'),'rb') as handle:
                 self.image_feature_dict = pickle.load(handle)
                 print('train image feature dict')
@@ -103,20 +111,28 @@ class AIRUSH2dataset(keras.utils.Sequence):
 
         print('count history')
         history_num = []
-        log_num = 10000
+        log_num = 10000*100
+        history_sel_num = 1
+        top_history1 = []
+
         for idx in range(self.item.shape[0]):
             if(idx%log_num==0):
                 print('count process',idx, '/',self.item.shape[0])
             cur_article = self.item['read_article_ids'].loc[idx]
             if type(cur_article) == str:
-                 list_article = cur_article.split(',')
+                list_article = cur_article.split(',')
+                top_history1.append(list_article[0])
             else:
                 list_article = []
+                top_history1.append("")
+
             history_num.append(len(list_article))
-            get_item_count_max(list_article)
+            #get_item_count_max(list_article)
 
 
         self.item['history_num'] = pd.Series(history_num, index=self.item.index)
+        self.item['top_history1'] = pd.Series(top_history1, index=self.item.index)
+
         print('self.item print')
         for c in self.item.columns:
             print(c)
@@ -134,6 +150,41 @@ class AIRUSH2dataset(keras.utils.Sequence):
         if self.args['use_age']:
             self.age = {'unknown': 0, '-14': 1, '15-19': 2, '20-24': 3, '25-29': 4,
                         '30-34': 5, '35-39': 6, '40-44': 7, '45-49': 8, '50-': 9}
+
+
+        use_np_file = True
+        if use_np_file==True:
+            for idx in range(self.item.shape[0]):
+                if(idx%log_num==0):
+                    print('make numpy process',idx, '/',self.item.shape[0])
+                article_id, hh, gender, age_range, read_article_ids,history_num,top_history1 = self.item.loc[idx
+                                                     , ['article_id', 'hh', 'gender', 'age_range', 'read_article_ids','history_num','top_history1']]
+                extracted_image_feature = self.image_feature_dict[article_id]
+                top_history1_feature  = self.image_feature_dict[top_history1]
+                flat_features = []
+                if self.args['use_sex']:
+                    sex = self.sex[gender]
+                    label_onehot = np.zeros(2, dtype=np.float32)
+                    label_onehot[sex - 1] = 1
+                    flat_features.extend(label_onehot)
+
+                if self.args['use_age']:
+                    age = self.age[age_range]
+                    label_onehot = np.zeros(9, dtype=np.float32)
+                    label_onehot[age - 1] = 1
+                    flat_features.extend(label_onehot)
+
+                if self.args['use_exposed_time']:
+                    time = hh
+                    label_onehot = np.zeros((24), dtype=np.float32)
+                    label_onehot[time - 1] = 1
+                    flat_features.extend(label_onehot)
+
+                flat_features.extend(history_num)
+                flat_features.extend(extracted_image_feature)
+                flat_features.extend(top_history1_feature)
+                flat_features = np.array(flat_features).flatten()
+                print(flat_features.shape)
 
     def __len__(self):
         return len(self.item)
