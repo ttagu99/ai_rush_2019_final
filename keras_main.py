@@ -34,7 +34,8 @@ from sklearn.model_selection import train_test_split
 #import lightgbm as lgb
 from sklearn.externals import joblib
 from lightgbm import LGBMClassifier
-
+# sklearn tools for model training and assesment
+from sklearn.model_selection import GridSearchCV
 
 # expected to be a difficult problem
 # Gives other meta data (gender age, etc.) but it's hard to predict click through rate
@@ -112,9 +113,58 @@ def build_cnn_model(backbone= MobileNetV2, input_shape =  (224,224,3), use_image
     print('build_cnn_model')
     return model
 
+
+params = {'boosting_type': 'gbdt',
+          'max_depth' : -1,
+          'objective': 'binary',
+          'nthread': 3, # Updated from nthread
+          'num_leaves': 64,
+          'learning_rate': 0.05,
+          'max_bin': 512,
+          'subsample_for_bin': 200,
+          'subsample': 1,
+          'subsample_freq': 1,
+          'colsample_bytree': 0.8,
+          'reg_alpha': 5,
+          'reg_lambda': 10,
+          'min_split_gain': 0.5,
+          'min_child_weight': 1,
+          'min_child_samples': 5,
+          'scale_pos_weight': 1,
+          'num_class' : 1,
+          'metric' : 'binary_error',
+          'n_estimators': 5000
+          }
+# Create parameters to search
+#gridParams = {
+#    'learning_rate': [0.005],
+#    'n_estimators': [40],
+#    'num_leaves': [6,8,12,16],
+#    'boosting_type' : ['gbdt'],
+#    'objective' : ['binary'],
+#    'random_state' : [501], # Updated from 'seed'
+#    'colsample_bytree' : [0.65, 0.66],
+#    'subsample' : [0.7,0.75],
+#    'reg_alpha' : [1,1.2],
+#    'reg_lambda' : [1,1.2,1.4],
+#    }
+
+
 def main(args):   
     cnn_model = build_cnn_model(backbone=MobileNetV2, use_imagenet = None)
-    gbm_model = LGBMClassifier(objective='binary', random_state=777)
+    gbm_model = LGBMClassifier(boosting_type= 'gbdt',
+          objective = 'binary',
+          n_jobs = 3, # Updated from 'nthread'
+          silent = False,
+          max_depth = params['max_depth'],
+          max_bin = params['max_bin'],
+          subsample_for_bin = params['subsample_for_bin'],
+          subsample = params['subsample'],
+          subsample_freq = params['subsample_freq'],
+          min_split_gain = params['min_split_gain'],
+          min_child_weight = params['min_child_weight'],
+          min_child_samples = params['min_child_samples'],
+          scale_pos_weight = params['scale_pos_weight'])
 
     if use_nsml:
         bind_nsml(cnn_model, gbm_model)
@@ -122,66 +172,88 @@ def main(args):
         nsml.paused(scope=locals())
 
     if (args.mode == 'train'):
-        train_loader, dataset_sizes = get_data_loader(
+        #train_loader, dataset_sizes = 
+        get_data_loader(
             root=os.path.join(DATASET_PATH, 'train', 'train_data', 'train_data'),
             phase='train',
             batch_size=args.batch_size)
 
         start_time = datetime.datetime.now()
-        iter_per_epoch = len(train_loader)
-        #best_loss = 1000
-        #if args.dry_run:
-        #    print('start dry-running...!')
-        #    args.num_epochs = 1
-        #else:
-        #    print('start training...!')
+        TotalX = np.load('TrainX.npy')
+        TotalY = np.load('TrainY.npy')
+        print('TotalX.shape',TotalX.shape, 'TotalY.shape',TotalY.shape)
+        X_train, X_test, Y_train, Y_test = train_test_split(TotalX, TotalY, test_size=0.05, random_state=777)
+        print('X_train.shape',X_train.shape, 'X_test.shape',X_test.shape, 'Y_train.shape',Y_train.shape, 'Y_test.shape',Y_test.shape)
 
-        for epoch in range(args.num_epochs):
-            for i, data in enumerate(train_loader):
-                images, extracted_image_features, labels, flat_features = data
+        # To view the default model params:
+        gbm_model.get_params().keys()
+        eval_set = (X_test,Y_test)
+        gbm_model.fit(X_train,Y_train,)
 
-                images = images.cuda()
-                extracted_image_features = extracted_image_features.cuda()
-                flat_features = flat_features.cuda()
-                labels = labels.cuda()
+        gbm_model.fit(X_train, Y_train,
+            eval_set=[(X_test,Y_test)],
+            eval_metric='binary_error',
+            early_stopping_rounds=50)
 
-                # forward
-                if args.arch == 'MLP':
-                    logits = model(extracted_image_features, flat_features)
-                elif args.arch == 'Resnet':
-                    logits = model(images, flat_features)
-                criterion = nn.MSELoss()
-                loss = torch.sqrt(criterion(logits.squeeze(), labels.float()))
+        nsml.save('last')
+        ## Create the grid
+        #grid = GridSearchCV(gbm_model, gridParams,
+        #                    verbose=1,
+        #                    cv=4,
+        #                    n_jobs=2)
+        ## Run the grid
+        #grid.fit(TotalX, TotalY)
 
-                # backward and optimize
-                optimizer.zero_grad()
-                loss.backward()
-                optimizer.step()
+        ## Print the best parameters found
+        #print(grid.best_params_)
+        #print(grid.best_score_)
 
-                if loss < best_loss:
-                    nsml.save('best_loss')  # this will save your best model on nsml.
+    #    for epoch in range(args.num_epochs):
+    #        for i, data in enumerate(train_loader):
+    #            images, extracted_image_features, labels, flat_features = data
+
+    #            images = images.cuda()
+    #            extracted_image_features = extracted_image_features.cuda()
+    #            flat_features = flat_features.cuda()
+    #            labels = labels.cuda()
+
+    #            # forward
+    #            if args.arch == 'MLP':
+    #                logits = model(extracted_image_features, flat_features)
+    #            elif args.arch == 'Resnet':
+    #                logits = model(images, flat_features)
+    #            criterion = nn.MSELoss()
+    #            loss = torch.sqrt(criterion(logits.squeeze(), labels.float()))
+
+    #            # backward and optimize
+    #            optimizer.zero_grad()
+    #            loss.backward()
+    #            optimizer.step()
+
+    #            if loss < best_loss:
+    #                nsml.save('best_loss')  # this will save your best model on nsml.
 
 
 
-                if i % args.print_every == 0:
-                    elapsed = datetime.datetime.now() - start_time
-                    print('Elapsed [%s], Epoch [%i/%i], Step [%i/%i], Loss: %.4f'
-                          % (elapsed, epoch + 1, args.num_epochs, i + 1, iter_per_epoch, loss.item()))
-                #if i % args.save_step_every == 0:
-                #    # print('debug ] save testing purpose')
-                #    nsml.save('step_' + str(i))  # this will save your current model on nsml.
+    #            if i % args.print_every == 0:
+    #                elapsed = datetime.datetime.now() - start_time
+    #                print('Elapsed [%s], Epoch [%i/%i], Step [%i/%i], Loss: %.4f'
+    #                      % (elapsed, epoch + 1, args.num_epochs, i + 1, iter_per_epoch, loss.item()))
+    #            #if i % args.save_step_every == 0:
+    #            #    # print('debug ] save testing purpose')
+    #            #    nsml.save('step_' + str(i))  # this will save your current model on nsml.
 
-            if epoch % args.save_epoch_every == 0:
-                nsml.report(
-                    summary=True,
-                    step=epoch,
-                    scope=locals(),
-                    **{
-                    "Loss": loss.item(),
-                    })
+    #        if epoch % args.save_epoch_every == 0:
+    #            nsml.report(
+    #                summary=True,
+    #                step=epoch,
+    #                scope=locals(),
+    #                **{
+    #                "Loss": loss.item(),
+    #                })
 
-                nsml.save('epoch_' + str(epoch))  # this will save your current model on nsml.
-    nsml.save('final')
+    #            nsml.save('epoch_' + str(epoch))  # this will save your current model on nsml.
+    #nsml.save('final')
 
 
 if __name__ == '__main__':

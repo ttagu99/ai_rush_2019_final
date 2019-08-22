@@ -1,22 +1,43 @@
 import pickle
-
-#import torch
-#from torch.utils.data import DataLoader
-#from torch.utils.data import Dataset
-#from torchvision.transforms import ToTensor
 import os
 from PIL import Image
 import numpy as np
 import pandas as pd
 import nsml
-import keras
-
 from utils import get_transforms
 from utils import default_loader
 from collections import Counter
 import operator
+import keras
+from keras.models import Sequential
+from keras.layers import Concatenate
+from keras.layers import Dense, Dropout, Flatten, Activation,Average
+from keras.layers import Conv2D, MaxPooling2D, GlobalAveragePooling2D, BatchNormalization,Input
+from keras.callbacks import ReduceLROnPlateau, EarlyStopping, ModelCheckpoint
+from keras import backend as K
+from keras.applications.xception import Xception
+from keras.applications.densenet import DenseNet121, DenseNet169, DenseNet201
+from keras.applications.nasnet import NASNetMobile
+from keras.applications.resnet50 import ResNet50
+from keras.applications.nasnet import NASNetLarge
+from keras.applications.mobilenetv2 import MobileNetV2
+from keras.applications.inception_resnet_v2 import InceptionResNetV2
+from keras.models import Model,load_model
+from keras.optimizers import Adam, SGD
+from sklearn.model_selection import train_test_split
 
-
+def build_cnn_model(backbone= MobileNetV2, input_shape =  (224,224,3), use_imagenet = 'imagenet', base_freeze=True):
+    base_model = backbone(input_shape=input_shape, weights=use_imagenet, include_top= False)#, classes=NCATS)
+    x = base_model.output
+    gap_x = GlobalAveragePooling2D()(x)
+    #predict = Dense(num_classes, activation='softmax', name='last_softmax')(x)
+    model = Model(inputs=base_model.input, outputs=gap_x)
+    if base_freeze==True:
+        for layer in base_model.layers:
+            layer.trainable = False
+    #model.compile(loss='categorical_crossentropy',   optimizer=opt,  metrics=['accuracy'])
+    print('build_cnn_model')
+    return model
 #def get_item_count_max(atricles, top_num = 3):
 #    result = Counter(atricles)
 #    result = sorted(result.items(), key=operator.itemgetter(1),reverse=True)
@@ -43,7 +64,7 @@ class AIRUSH2dataset(keras.utils.Sequence):
                  args,
                  transform=None,
                  mapping=None,
-                 mode='dummy',shuffle=False, history_max_view=10):
+                 mode='dummy',shuffle=False, history_max_view=1):
 
         """
         Args:
@@ -87,10 +108,11 @@ class AIRUSH2dataset(keras.utils.Sequence):
 
             isdebug = True
             if isdebug ==True:
-                self.item = self.item[:1000]
-                self.label = self.label[:1000]
+                self.item = self.item[:10000*50]
+                self.label = self.label[:10000*50]
 
-            # history에 있는 image가 모두 extract 되어있지 않음. 내일 여기에서 추출 후 저장 하는거부터 작업 필요.
+
+
             with open(os.path.join(DATASET_PATH, 'train', 'train_data', 'train_image_features.pkl'),'rb') as handle:
                 self.image_feature_dict = pickle.load(handle)
                 print('train image feature dict')
@@ -111,7 +133,7 @@ class AIRUSH2dataset(keras.utils.Sequence):
 
         print('count history')
         history_num = []
-        log_num = 10000*100
+        log_num = 10000*10
         history_sel_num = 1
         top_history1 = []
 
@@ -154,13 +176,14 @@ class AIRUSH2dataset(keras.utils.Sequence):
 
         use_np_file = True
         if use_np_file==True:
+            features_list  = []
             for idx in range(self.item.shape[0]):
                 if(idx%log_num==0):
                     print('make numpy process',idx, '/',self.item.shape[0])
                 article_id, hh, gender, age_range, read_article_ids,history_num,top_history1 = self.item.loc[idx
                                                      , ['article_id', 'hh', 'gender', 'age_range', 'read_article_ids','history_num','top_history1']]
                 extracted_image_feature = self.image_feature_dict[article_id]
-                top_history1_feature  = self.image_feature_dict[top_history1]
+                #top_history1_feature  = self.image_feature_dict[top_history1]
                 flat_features = []
                 if self.args['use_sex']:
                     sex = self.sex[gender]
@@ -180,11 +203,24 @@ class AIRUSH2dataset(keras.utils.Sequence):
                     label_onehot[time - 1] = 1
                     flat_features.extend(label_onehot)
 
-                flat_features.extend(history_num)
+                flat_features.append(history_num)
                 flat_features.extend(extracted_image_feature)
-                flat_features.extend(top_history1_feature)
+                #flat_features.extend(top_history1_feature) #나중에 추가
                 flat_features = np.array(flat_features).flatten()
-                print(flat_features.shape)
+                features_list.append(flat_features)
+
+            if args['mode']== 'train':
+                np.save('TrainX.npy',features_list)
+                #features_np = np.load('TrainX.npy')
+                #print('TrainX.shape',features_np.shape)
+                TrainY = self.label.to_numpy().squeeze()
+                np.save('TrainY.npy',TrainY)
+                print('TrainY.shape',TrainY.shape)                
+            else:
+                np.save('TestX.npy',features_list)
+                features_np = np.load('TestX.npy')
+                print('TestX.shape',features_np.shape)
+
 
     def __len__(self):
         return len(self.item)
@@ -289,13 +325,12 @@ def get_data_loader(root, phase, batch_size=16, verbose=True):
         )
         dataset_sizes = len(image_datasets)
 
-        dataloaders = torch.utils.data.DataLoader(image_datasets,
-                                                  batch_size=batch_size,
-                                                  shuffle=(built_in_args['mode'] == 'train'),
-                                                  pin_memory=False,
-                                                  num_workers=built_in_args['num_workers'])
-
-        return dataloaders, dataset_sizes
+        #dataloaders = torch.utils.data.DataLoader(image_datasets,
+        #                                          batch_size=batch_size,
+        #                                          shuffle=(built_in_args['mode'] == 'train'),
+        #                                          pin_memory=False,
+        #                                          num_workers=built_in_args['num_workers'])
+        #return dataloaders, dataset_sizes
     elif phase == 'test':
         print('[debug] data local loader ', phase)
 
@@ -312,12 +347,12 @@ def get_data_loader(root, phase, batch_size=16, verbose=True):
         )
         dataset_sizes = len(image_datasets)
 
-        dataloaders = torch.utils.data.DataLoader(image_datasets,
-                                                  batch_size=batch_size,
-                                                  shuffle=False,
-                                                  pin_memory=False,
-                                                  num_workers=built_in_args['num_workers'])
-        return dataloaders, dataset_sizes
+        #dataloaders = torch.utils.data.DataLoader(image_datasets,
+        #                                          batch_size=batch_size,
+        #                                          shuffle=False,
+        #                                          pin_memory=False,
+        #                                          num_workers=built_in_args['num_workers'])
+        #return dataloaders, dataset_sizes
     elif phase == 'infer':
         print('[debug] data local loader ', phase)
 
