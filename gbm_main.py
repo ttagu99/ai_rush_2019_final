@@ -1,4 +1,4 @@
-from data_local_loader_keras import AiRushDataGenerator,
+from data_local_loader_keras import get_data_loader
 #import torch
 #import torch.nn as nn
 #import torch.nn.functional as F
@@ -29,14 +29,13 @@ from keras.applications.inception_resnet_v2 import InceptionResNetV2
 from keras.models import Model,load_model
 from keras.optimizers import Adam, SGD
 from sklearn.model_selection import train_test_split
-from nsml import DATASET_PATH, DATASET_NAME, NSML_NFS_OUTPUT, SESSION_NAME
 #import imgaug as ia
 #from imgaug import augmenters as iaa
 #import lightgbm as lgb
-#from sklearn.externals import joblib
-#from lightgbm import LGBMClassifier
-## sklearn tools for model training and assesment
-#from sklearn.model_selection import GridSearchCV
+from sklearn.externals import joblib
+from lightgbm import LGBMClassifier
+# sklearn tools for model training and assesment
+from sklearn.model_selection import GridSearchCV
 
 # expected to be a difficult problem
 # Gives other meta data (gender age, etc.) but it's hard to predict click through rate
@@ -55,18 +54,19 @@ print('start using nsml...!')
 print('DATASET_PATH: ', DATASET_PATH)
 use_nsml = True
 
-def bind_nsml(model):
+def bind_nsml(cnn_model,gbm_model):
     def save(dir_name):
         os.makedirs(dir_name, exist_ok=True)
-        model.save_weights(os.path.join(dir_name, 'model.h5'))
-        print('model saved!', os.path.join(dir_name, 'model.h5'))
-        #joblib.dump(gbm_model,  os.path.join(dir_name, 'gbm_model.pkl'))
-        #print('gbm_model saved!', os.path.join(dir_name, 'gbm_model.pkl'))
+        cnn_model.save_weights(os.path.join(dir_name, 'cnn_model.h5'))
+        print('cnn_model saved!', os.path.join(dir_name, 'cnn_model.h5'))
+        joblib.dump(gbm_model,  os.path.join(dir_name, 'gbm_model.pkl'))
+        print('gbm_model saved!', os.path.join(dir_name, 'gbm_model.pkl'))
+
     def load(dir_name):
-        model.load_weights(os.path.join(dir_name, 'model.h5'))
-        print('model loaded!', os.path.join(dir_name, 'model.h5'))
-        #gbm_model = joblib.load( os.path.join(dir_name, 'gbm_model.pkl'))
-        #print('gbm_model loaded!',  os.path.join(dir_name, 'gbm_model.pkl'))
+        cnn_model.load_weights(os.path.join(dir_name, 'cnn_model.h5'))
+        print('cnn_model loaded!', os.path.join(dir_name, 'cnn_model.h5'))
+        gbm_model = joblib.load( os.path.join(dir_name, 'gbm_model.pkl'))
+        print('gbm_model loaded!',  os.path.join(dir_name, 'gbm_model.pkl'))
         print('loaded model checkpoints...!')
 
     def infer(root):
@@ -99,58 +99,103 @@ def _infer(root, phase, model, task):
     #    print('end infer')
     #return y_pred
 
-def build_model():
-    inp = Input(shape=( ))
-    x = Dense(128, activation="relu")(x)
-    x = Dense(1, activation="sigmoid")(x)
-    model = Model(inputs=inp, outputs=x)
-    model.compile(loss='binary_crossentropy', optimizer='adam', metrics=['accuracy'])
-    model.summary()     
+
+def build_cnn_model(backbone= MobileNetV2, input_shape =  (224,224,3), use_imagenet = 'imagenet', base_freeze=True):
+    base_model = backbone(input_shape=input_shape, weights=use_imagenet, include_top= False)#, classes=NCATS)
+    x = base_model.output
+    gap_x = GlobalAveragePooling2D()(x)
+    #predict = Dense(num_classes, activation='softmax', name='last_softmax')(x)
+    model = Model(inputs=base_model.input, outputs=gap_x)
+    if base_freeze==True:
+        for layer in base_model.layers:
+            layer.trainable = False
+    #model.compile(loss='categorical_crossentropy',   optimizer=opt,  metrics=['accuracy'])
+    print('build_cnn_model')
     return model
 
+
+params = {'boosting_type': 'gbdt',
+          'max_depth' : -1,
+          'objective': 'binary',
+          'nthread': 3, # Updated from nthread
+          'num_leaves': 64,
+          'learning_rate': 0.05,
+          'max_bin': 512,
+          'subsample_for_bin': 200,
+          'subsample': 1,
+          'subsample_freq': 1,
+          'colsample_bytree': 0.8,
+          'reg_alpha': 5,
+          'reg_lambda': 10,
+          'min_split_gain': 0.5,
+          'min_child_weight': 1,
+          'min_child_samples': 5,
+          'scale_pos_weight': 1,
+          'num_class' : 1,
+          'metric' : 'binary_error',
+          'n_estimators': 5000
+          }
+# Create parameters to search
+#gridParams = {
+#    'learning_rate': [0.005],
+#    'n_estimators': [40],
+#    'num_leaves': [6,8,12,16],
+#    'boosting_type' : ['gbdt'],
+#    'objective' : ['binary'],
+#    'random_state' : [501], # Updated from 'seed'
+#    'colsample_bytree' : [0.65, 0.66],
+#    'subsample' : [0.7,0.75],
+#    'reg_alpha' : [1,1.2],
+#    'reg_lambda' : [1,1.2,1.4],
+#    }
+
+
 def main(args):   
-    model = build_model()
+    cnn_model = build_cnn_model(backbone=MobileNetV2, use_imagenet = None)
+    gbm_model = LGBMClassifier(boosting_type= 'gbdt',
+          objective = 'binary',
+          n_jobs = 3, # Updated from 'nthread'
+          silent = False,
+          max_depth = params['max_depth'],
+          max_bin = params['max_bin'],
+          subsample_for_bin = params['subsample_for_bin'],
+          subsample = params['subsample'],
+          subsample_freq = params['subsample_freq'],
+          min_split_gain = params['min_split_gain'],
+          min_child_weight = params['min_child_weight'],
+          min_child_samples = params['min_child_samples'],
+          scale_pos_weight = params['scale_pos_weight'])
+
     if use_nsml:
-        bind_nsml(model)
+        bind_nsml(cnn_model, gbm_model)
     if args.pause:
         nsml.paused(scope=locals())
 
-
     if (args.mode == 'train'):
-        csv_file = os.path.join(DATASET_PATH, 'train', 'train_data', 'train_data')
-    else:
-        csv_file = os.path.join(csv_file, 'test', 'test_data', 'test_data')
-    item = pd.read_csv(csv_file,
-                            dtype={
-                                'article_id': str,
-                                'hh': int, 'gender': str,
-                                'age_range': str,
-                                'read_article_ids': str
-                            }, sep='\t')
+        #train_loader, dataset_sizes = 
+        get_data_loader(
+            root=os.path.join(DATASET_PATH, 'train', 'train_data', 'train_data'),
+            phase='train',
+            batch_size=args.batch_size)
 
-    print('item.shap', item.shape)
-    print(item.head(10))
+        start_time = datetime.datetime.now()
+        TotalX = np.load('TrainX.npy')
+        TotalY = np.load('TrainY.npy')
+        print('TotalX.shape',TotalX.shape, 'TotalY.shape',TotalY.shape)
+        X_train, X_test, Y_train, Y_test = train_test_split(TotalX, TotalY, test_size=0.05, random_state=777)
+        print('X_train.shape',X_train.shape, 'X_test.shape',X_test.shape, 'Y_train.shape',Y_train.shape, 'Y_test.shape',Y_test.shape)
 
-    if (args.mode == 'train'):
-        label_data_path = os.path.join(DATASET_PATH, 'train',
-                                        os.path.basename(os.path.normpath(csv_file)).split('_')[0] + '_label')
-        label = pd.read_csv(label_data_path,
-                                    dtype={'label': int},
-                                    sep='\t')
-        print('train label csv')
-        print(label.head(10))
+        # To view the default model params:
+        gbm_model.get_params().keys()
+        eval_set = (X_test,Y_test)
+        gbm_model.fit(X_train,Y_train,)
 
+        gbm_model.fit(X_train, Y_train,
+            eval_set=[(X_test,Y_test)],
+            eval_metric='binary_error',
+            early_stopping_rounds=50)
 
-
-    train_df, valid_df, train_dfy, valid_dfy
-    # Generators
-    training_generator = AiRushDataGenerator(partition['train'], labels, **params)
-    validation_generator = AiRushDataGenerator(partition['validation'], labels, **params)
-
-
-
-
-    nsml.save('last')
+        nsml.save('last')
         ## Create the grid
         #grid = GridSearchCV(gbm_model, gridParams,
         #                    verbose=1,

@@ -76,58 +76,6 @@ def make_features_and_distcnt(root_dir, model, full_list, save_path, distcnt_pat
     output.close()
     return features, distcnts
 
-#def make_np_file():
-#    features_list  = []
-#    for idx in range(self.item.shape[0]):
-#        if(idx%log_num==0):
-#            print('make numpy process',idx, '/',self.item.shape[0])
-#        article_id, hh, gender, age_range, read_article_ids,history_num,top_history1 = self.item.loc[idx
-#                                                , ['article_id', 'hh', 'gender', 'age_range', 'read_article_ids','history_num','top_history1']]
-#        extracted_image_feature = self.image_feature_dict[article_id]
-#        #top_history1_feature  = self.image_feature_dict[top_history1]
-#        flat_features = []
-#        sex = self.sex[gender]
-#        label_onehot = np.zeros(2, dtype=np.float32)
-#        label_onehot[sex - 1] = 1
-#        flat_features.extend(label_onehot)
-#        age = self.age[age_range]
-#        label_onehot = np.zeros(9, dtype=np.float32)
-#        label_onehot[age - 1] = 1
-#        flat_features.extend(label_onehot)
-#        time = hh
-#        label_onehot = np.zeros((24), dtype=np.float32)
-#        label_onehot[time - 1] = 1
-#        flat_features.extend(label_onehot)
-
-#        flat_features.append(history_num)
-#        flat_features.extend(extracted_image_feature)
-#        #flat_features.extend(top_history1_feature) #나중에 추가
-#        flat_features = np.array(flat_features).flatten()
-#        features_list.append(flat_features)
-
-#    if args['mode']== 'train':
-#        np.save('TrainX.npy',features_list)
-#        TrainY = self.label.to_numpy().squeeze()
-#        np.save('TrainY.npy',TrainY)
-#        print('TrainY.shape',TrainY.shape)                
-#    else:
-#        np.save('TestX.npy',features_list)
-#        features_np = np.load('TestX.npy')
-#        print('TestX.shape',features_np.shape)
-
-#def check_max_duplicate():
-#    max_article = 0 #2427
-#    for idx in range(self.item.shape[0]):
-#        cur_article = self.item['read_article_ids'].loc[idx]
-#        if type(cur_article) == str:
-#             list_article = cur_article.split(',')
-#        else:
-#            list_article = []
-
-#        if max_article < len(list_article):
-#            max_article = len(list_article)
-#    print('max_article',max_article)
-
 
 
 
@@ -145,71 +93,23 @@ else:
 
 
 
-class AIRUSH2dataset(keras.utils.Sequence):
+class AiRushDataGenerator(keras.utils.Sequence):
     def __init__(self,
-                 csv_file,
-                 root_dir,
-                 transform=None,shuffle=False,batch_size=200,mode='train'):
-
-        """
-        Args:
-            csv_file (string): Path to the csv file with annotations.
-            root_dir (string): Directory with all the images.
-            args (argparse object): given arguments of main.py
-            transform (callable, optional): Optional transform to be applied
-                on a sample.
-            mapping (list: (int, int, string), optional): Optional parameter for k-fold
-                cross validation.
-            mode (string): 'train' or 'valid' or 'test'
-        """
+                 root_dir,  item, label=None,
+                 transform=None,shuffle=False,batch_size=200,mode='train' ):
         self.batch_size = batch_size
-
         self.shuffle = shuffle
-        self.on_epoch_end()
+        self.label = label
+        self.item = item
         self.mode = mode
         self.root_dir = root_dir
         self.transform = transform
         self.hist_maxuse_num = 3
-
         self.features_model = build_cnn_model()
-        if self.mode== 'train':
-            self.item = pd.read_csv(csv_file,
-                                    dtype={
-                                        'article_id': str,
-                                        'hh': int, 'gender': str,
-                                        'age_range': str,
-                                        'read_article_ids': str
-                                    }, sep='\t')
+        self.on_epoch_end()
 
-
-            label_data_path = os.path.join(DATASET_PATH, 'train',
-                                           os.path.basename(os.path.normpath(csv_file)).split('_')[0] + '_label')
-            self.label = pd.read_csv(label_data_path,
-                                     dtype={'label': int},
-                                     sep='\t')
-            print('train label csv')
-            print(self.label.head(10))
-
-            isdebug = True
-            if isdebug ==True:
-                self.item = self.item[:10000*50]
-                self.label = self.label[:10000*50]
-
-            full_list = self.item['article_id'].values.tolist()
-            self.image_feature_dict, self.distcnts = make_features_and_distcnt(self.features_model, full_list, 'features.pkl', 'distr_cnt.pkl')
-        else:
-            csv_file = os.path.join(csv_file, 'test', 'test_data', 'test_data')
-            self.item = pd.read_csv(csv_file,
-                                    dtype={
-                                        'article_id': str,
-                                        'hh': int, 'gender': str,
-                                        'age_range': str,
-                                        'read_article_ids': str
-                                    }, sep='\t')
-            full_list = self.item['article_id'].values.tolist()
-            self.image_feature_dict, self.distcnts = make_features_and_distcnt(self.features_model, full_list, 'features.pkl', 'distr_cnt.pkl')
-        self.list_IDs = self.item.index
-        ##인덱스로 val,train set 나눌수 있도록 작업 부터
+        full_list = self.item['article_id'].values.tolist()
+        self.image_feature_dict, self.distcnts = make_features_and_distcnt(self.features_model, full_list, 'features.pkl', 'distr_cnt.pkl')
         print('count history')
         history_num = []
         log_num = 10000*10
@@ -232,8 +132,6 @@ class AIRUSH2dataset(keras.utils.Sequence):
             #get_item_count_max(list_article)
         self.history_feature_dict, self.history_distcnts = make_features_and_distcnt(self.features_model, total_list_article, 'history_features.pkl', 'history_distr_cnt.pkl')
         self.item['history_num'] = pd.Series(history_num, index=self.item.index)
-        #self.item['his1'] = pd.Series(top_history1, index=self.item.index)
-
         print('self.item print')
         for c in self.item.columns:
             print(c)
@@ -241,7 +139,6 @@ class AIRUSH2dataset(keras.utils.Sequence):
 
     def __len__(self):
         return len(self.item)
-
 
     def get_hist_features(cur_article=None, sel_shuffle=False, out_shape=2048):
         if type(cur_article) == str:
@@ -272,8 +169,8 @@ class AIRUSH2dataset(keras.utils.Sequence):
     def __getitem__(self, index):
         'Generate one batch of data'
         # Generate indexes of the batch
-        indexes = self.indexes[index*self.batch_size:(index+1)*self.batch_size]
-        X, y = self.__data_generation(indexes)
+        idxs = self.indexes[index*self.batch_size:(index+1)*self.batch_size]
+        X, y = self.__data_generation(idxs)
         return X, y
 
     def __data_generation(self, idxs):
@@ -288,7 +185,7 @@ class AIRUSH2dataset(keras.utils.Sequence):
     def get_one_data(self, idx):
         article_id, hh, gender, age_range, read_article_ids,history_num  = self.item.loc[idx
                        , ['article_id', 'hh', 'gender', 'age_range', 'read_article_ids','history_num']]
-        if self.args['mode'] == 'train':
+        if self.mode== 'train':
             label = self.label.loc[idx, ['label']]
             label = np.array(label, dtype=np.float32)
         else:
@@ -301,20 +198,15 @@ class AIRUSH2dataset(keras.utils.Sequence):
         label_onehot = np.zeros(2, dtype=np.float32)
         label_onehot[sex - 1] = 1
         flat_features.extend(label_onehot)
-
-
         age = self.age[age_range]
         label_onehot = np.zeros(9, dtype=np.float32)
         label_onehot[age - 1] = 1
         flat_features.extend(label_onehot)
-
-
         time = hh
         label_onehot = np.zeros((24), dtype=np.float32)
         label_onehot[time - 1] = 1
         flat_features.extend(label_onehot)
-
-        mer_hist_np = self.get_hist_features(cur_article=read_article_ids, sel_shuffle=False, out_shape=extracted_image_feature.shape)
+        mer_hist_np = self.get_hist_features(cur_article=read_article_ids, sel_shuffle=self.shuffle, out_shape=extracted_image_feature.shape)
         flat_features.extend(extracted_image_feature)
         flat_features.extend(mer_hist_np)
         flat_features = np.array(flat_features).flatten()
@@ -324,105 +216,6 @@ class AIRUSH2dataset(keras.utils.Sequence):
 
     def on_epoch_end(self):
         'Updates indexes after each epoch'
-        self.indexes = np.arange(self.item.shape[0])
+        self.indexes = self.item.index.values.tolist()
         if self.shuffle == True:
             np.random.shuffle(self.indexes)
-
-
-
-# Parameters
-params = {'dim': (32,32,32),
-          'batch_size': 64,
-          'n_classes': 6,
-          'n_channels': 1,
-          'shuffle': True}
-
-# Datasets
-partition = # IDs
-labels = # Labels
-
-# Generators
-training_generator = AIRUSH2dataset(
-            csv_path,
-            os.path.join(DATASET_PATH, 'train', 'train_data', 'train_image'),
-            args=built_in_args,
-            transform=data_transforms,
-            mode='train'
-        )
-
-
-validation_generator = DataGenerator(partition['validation'], labels, **params)
-
-
-
-def get_data_loader(root, phase, batch_size=16, verbose=True):
-    csv_path = root
-
-    data_transforms = get_transforms('[transforms.Resize((456, 232))]', verbose=verbose)
-    if phase == 'train':
-        print('[debug] data local loader ', phase)
-        built_in_args = {'mode': 'train', 'use_sex': True, 'use_age': True, 'use_exposed_time': True,
-                         'use_read_history': False,
-                         'num_workers': 2, }
-
-        image_datasets = AIRUSH2dataset(
-            csv_path,
-            os.path.join(DATASET_PATH, 'train', 'train_data', 'train_image'),
-            args=built_in_args,
-            transform=data_transforms,
-            mode='train'
-        )
-        dataset_sizes = len(image_datasets)
-
-        #dataloaders = torch.utils.data.DataLoader(image_datasets,
-        #                                          batch_size=batch_size,
-        #                                          shuffle=(built_in_args['mode'] == 'train'),
-        #                                          pin_memory=False,
-        #                                          num_workers=built_in_args['num_workers'])
-        #return dataloaders, dataset_sizes
-    elif phase == 'test':
-        print('[debug] data local loader ', phase)
-
-        built_in_args = {'mode': 'test', 'use_sex': True, 'use_age': True, 'use_exposed_time': True,
-                         'use_read_history': False,
-                         'num_workers': 3, }
-
-        image_datasets = AIRUSH2dataset(
-            csv_path,
-            os.path.join(DATASET_PATH, 'test', 'test_data', 'test_image'),
-            args=built_in_args,
-            transform=data_transforms,
-            mode='test'
-        )
-        dataset_sizes = len(image_datasets)
-
-        #dataloaders = torch.utils.data.DataLoader(image_datasets,
-        #                                          batch_size=batch_size,
-        #                                          shuffle=False,
-        #                                          pin_memory=False,
-        #                                          num_workers=built_in_args['num_workers'])
-        #return dataloaders, dataset_sizes
-    elif phase == 'infer':
-        print('[debug] data local loader ', phase)
-
-        built_in_args = {'mode': 'infer', 'use_sex': True, 'use_age': True, 'use_exposed_time': True,
-                         'use_read_history': False,
-                         'num_workers': 8, }
-
-        image_datasets = AIRUSH2dataset(
-            csv_path,
-            os.path.join(DATASET_PATH, 'test', 'test_data', 'test_image'),
-            args=built_in_args,
-            transform=data_transforms,
-            mode='test'
-        )
-        dataset_sizes = len(image_datasets)
-
-        dataloaders = torch.utils.data.DataLoader(image_datasets,
-                                                  batch_size=batch_size,
-                                                  shuffle=False,
-                                                  pin_memory=False,
-                                                  num_workers=built_in_args['num_workers'])
-        return dataloaders, dataset_sizes
-    else:
-        raise 'mode error'

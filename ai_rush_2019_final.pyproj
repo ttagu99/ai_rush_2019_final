@@ -29,6 +29,9 @@
       <SubType>Code</SubType>
     </Compile>
     <Compile Include="evaluation.py" />
+    <Compile Include="gbm_main.py">
+      <SubType>Code</SubType>
+    </Compile>
     <Compile Include="keras_main.py">
       <SubType>Code</SubType>
     </Compile>
