@@ -1,13 +1,10 @@
-from data_local_loader_keras import AiRushDataGenerator,
-#import torch
-#import torch.nn as nn
-#import torch.nn.functional as F
-#import torchvision.models as models
+from data_local_loader_keras import AiRushDataGenerator
 import os
 import argparse
 import numpy as np
 import time
 import datetime
+import pandas as pd
 
 from data_loader import feed_infer
 from evaluation import evaluation_metrics
@@ -77,6 +74,18 @@ def bind_nsml(model):
 
 
 def _infer(root, phase, model, task):
+    csv_file = os.path.join(csv_file, 'test', 'test_data', 'test_data')
+    item = pd.read_csv(csv_file,
+                            dtype={
+                                'article_id': str,
+                                'hh': int, 'gender': str,
+                                'age_range': str,
+                                'read_article_ids': str
+                            }, sep='\t')
+
+    print('item.shap', item.shape)
+    print(item.head(10))
+
     pass
     # root : csv file path
     #print('_infer root - : ', root)
@@ -100,8 +109,8 @@ def _infer(root, phase, model, task):
     #return y_pred
 
 def build_model():
-    inp = Input(shape=( ))
-    x = Dense(128, activation="relu")(x)
+    inp = Input(shape=(4048,1))
+    x = Dense(128, activation="relu")(inp)
     x = Dense(1, activation="sigmoid")(x)
     model = Model(inputs=inp, outputs=x)
     model.compile(loss='binary_crossentropy', optimizer='adam', metrics=['accuracy'])
@@ -110,16 +119,14 @@ def build_model():
 
 def main(args):   
     model = build_model()
+    print(model.output.shape)
     if use_nsml:
         bind_nsml(model)
     if args.pause:
         nsml.paused(scope=locals())
 
 
-    if (args.mode == 'train'):
-        csv_file = os.path.join(DATASET_PATH, 'train', 'train_data', 'train_data')
-    else:
-        csv_file = os.path.join(csv_file, 'test', 'test_data', 'test_data')
+    csv_file = os.path.join(DATASET_PATH, 'train', 'train_data', 'train_data')
     item = pd.read_csv(csv_file,
                             dtype={
                                 'article_id': str,
@@ -131,23 +138,28 @@ def main(args):
     print('item.shap', item.shape)
     print(item.head(10))
 
-    if (args.mode == 'train'):
-        label_data_path = os.path.join(DATASET_PATH, 'train',
-                                        os.path.basename(os.path.normpath(csv_file)).split('_')[0] + '_label')
-        label = pd.read_csv(label_data_path,
-                                    dtype={'label': int},
-                                    sep='\t')
-        print('train label csv')
-        print(label.head(10))
+    label_data_path = os.path.join(DATASET_PATH, 'train',
+                                    os.path.basename(os.path.normpath(csv_file)).split('_')[0] + '_label')
+    label = pd.read_csv(label_data_path,
+                                dtype={'label': int},
+                                sep='\t')
+    print('train label csv')
+    print(label.head(10))
 
 
 
-    train_df, valid_df, train_dfy, valid_dfy
+    train_df, valid_df, train_dfy, valid_dfy = train_test_split(item, label, test_size=0.05, random_state=777,stratify =label)
+    print('train_df.shape, valid_df.shape, train_dfy.shape, valid_dfy.shape'
+          ,train_df.shape, valid_df.shape, train_dfy.shape, valid_dfy.shape)
     # Generators
-    training_generator = AiRushDataGenerator(partition['train'], labels, **params)
-    validation_generator = AiRushDataGenerator(partition['validation'], labels, **params)
+    root=os.path.join(DATASET_PATH, 'train', 'train_data', 'train_image')
+    training_generator = AiRushDataGenerator(root, train_df, label=train_dfy,shuffle=False,batch_size=200,mode='train')
+    validation_generator = AiRushDataGenerator(root, valid_df, label=valid_dfy,shuffle=False,batch_size=200,mode='train')
 
+    model.summary()
 
+    eda_set = next(training_generator)
+    print(len(eda_set), eda_set[0].shape, eda_set[1].shape)
 
 
     nsml.save('last')

@@ -1,6 +1,7 @@
 import pickle
 import os
 from PIL import Image
+Image.LOAD_TRUNCATED_IMAGES = True
 import numpy as np
 import pandas as pd
 import nsml
@@ -26,7 +27,11 @@ from keras.models import Model,load_model
 from keras.optimizers import Adam, SGD
 from sklearn.model_selection import train_test_split
 import random
-def build_cnn_model(backbone= ResNet50, input_shape =  (224,224,3), use_imagenet = 'imagenet', base_freeze=True):
+from keras.preprocessing import image
+from keras.applications.mobilenetv2 import preprocess_input
+import accimage
+
+def build_cnn_model(backbone= MobileNetV2, input_shape =  (224,224,3), use_imagenet = None, base_freeze=True):
     base_model = backbone(input_shape=input_shape, weights=use_imagenet, include_top= False)#, classes=NCATS)
     x = base_model.output
     gap_x = GlobalAveragePooling2D()(x)
@@ -37,6 +42,7 @@ def build_cnn_model(backbone= ResNet50, input_shape =  (224,224,3), use_imagenet
             layer.trainable = False
     #model.compile(loss='categorical_crossentropy',   optimizer=opt,  metrics=['accuracy'])
     print('build_cnn_model')
+    model.summary()
     return model
 
 def merge_list(image_list):
@@ -46,7 +52,9 @@ def merge_list(image_list):
     return result
 
 def extract_feature(model, image_path):
-    img = image.load_img(img_path, target_size=(224, 224))
+    #img = default_loader(image_path)
+    img = accimage.Image(image_path)
+    img = image.load_img(image_path, target_size=(224, 224))
     img_data = image.img_to_array(img)
     img_data = np.expand_dims(img_data, axis=0)
     img_data = preprocess_input(img_data)
@@ -64,7 +72,7 @@ def make_features_and_distcnt(root_dir, model, full_list, save_path, distcnt_pat
             print('extract features process:',prs,'/',total_len)
         img_name = os.path.join(root_dir, article_id + '.jpg')
         cur_feature = extract_feature(model,img_name)
-        features[article_id] = cnn_feature
+        features[article_id] = cur_feature
         distcnts[article_id] = cnt
         prs+=1
 
@@ -94,8 +102,7 @@ else:
 
 
 class AiRushDataGenerator(keras.utils.Sequence):
-    def __init__(self,
-                 root_dir,  item, label=None,
+    def __init__(self,  root_dir,  item, label=None,
                  transform=None,shuffle=False,batch_size=200,mode='train' ):
         self.batch_size = batch_size
         self.shuffle = shuffle
@@ -109,7 +116,8 @@ class AiRushDataGenerator(keras.utils.Sequence):
         self.on_epoch_end()
 
         full_list = self.item['article_id'].values.tolist()
-        self.image_feature_dict, self.distcnts = make_features_and_distcnt(self.features_model, full_list, 'features.pkl', 'distr_cnt.pkl')
+
+        self.image_feature_dict, self.distcnts = make_features_and_distcnt(root_dir,self.features_model, full_list, 'features.pkl', 'distr_cnt.pkl')
         print('count history')
         history_num = []
         log_num = 10000*10

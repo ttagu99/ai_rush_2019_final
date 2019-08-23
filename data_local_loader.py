@@ -144,6 +144,7 @@ class AIRUSH2dataset(Dataset):
         if nsml.IS_ON_NSML:
             if self.args['mode'] == 'train':
                 img_name = os.path.join(self.root_dir, article_id + '.jpg')
+                print(img_name)
             else:  # test, infer
                 img_name = os.path.join(self.root_dir, article_id + '.jpg')
         else:
