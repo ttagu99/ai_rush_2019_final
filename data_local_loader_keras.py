@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 import nsml
 from utils import get_transforms
-from utils import default_loader
+from utils import default_loader,pil_loader
 from collections import Counter
 import operator
 import keras
@@ -29,7 +29,7 @@ from sklearn.model_selection import train_test_split
 import random
 from keras.preprocessing import image
 from keras.applications.mobilenetv2 import preprocess_input
-import accimage
+
 
 def build_cnn_model(backbone= MobileNetV2, input_shape =  (224,224,3), use_imagenet = None, base_freeze=True):
     base_model = backbone(input_shape=input_shape, weights=use_imagenet, include_top= False)#, classes=NCATS)
@@ -52,14 +52,31 @@ def merge_list(image_list):
     return result
 
 def extract_feature(model, image_path):
-    #img = default_loader(image_path)
-    img = accimage.Image(image_path)
-    img = image.load_img(image_path, target_size=(224, 224))
-    img_data = image.img_to_array(img)
+    try:
+        img = pil_loader(image_path)
+        img = img.resize((224, 224))
+        img_data = image.img_to_array(img)
+    except:
+        img_data = np.zeros((224,224,3))
     img_data = np.expand_dims(img_data, axis=0)
     img_data = preprocess_input(img_data)
     feature = model.predict(img_data)
     return feature
+
+def make_history_distcnt(full_list, distcnt_path):
+    image_dict = merge_list(full_list)
+    distcnts =dict()
+    total_len = len(image_dict)
+    prs=0
+    for article_id, cnt in image_dict:
+        distcnts[article_id] = cnt
+        prs+=1
+    output = open(distcnt_path, 'wb')
+    pickle.dump(distcnts, output)
+    output.close()
+    return distcnts
+
+
 
 def make_features_and_distcnt(root_dir, model, full_list, save_path, distcnt_path):
     image_dict = merge_list(full_list)
@@ -103,44 +120,31 @@ else:
 
 class AiRushDataGenerator(keras.utils.Sequence):
     def __init__(self,  root_dir,  item, label=None,
-                 transform=None,shuffle=False,batch_size=200,mode='train' ):
+                 transform=None,shuffle=False,batch_size=200,mode='train' #, features_model=None
+                 , image_feature_dict=None, distcnts=None, history_distcnts = None
+                 ):
+
         self.batch_size = batch_size
         self.shuffle = shuffle
         self.label = label
         self.item = item
+        self.indexes = self.item.index.values.tolist()
+        print(self.indexes)
+        #self.n = 0
+        #self.max = self.item.shape[0]//self.batch_size
         self.mode = mode
         self.root_dir = root_dir
         self.transform = transform
-        self.hist_maxuse_num = 3
-        self.features_model = build_cnn_model()
+        self.hist_maxuse_num = 1
+        #self.features_model = features_model
         self.on_epoch_end()
+        self.image_feature_dict = image_feature_dict
+        self.distcnts =distcnts
+        self.history_distcnts = history_distcnts
+        self.sex = {'unknown': 0, 'm': 1, 'f': 2}
+        self.age = {'unknown': 0, '-14': 1, '15-19': 2, '20-24': 3, '25-29': 4,
+                        '30-34': 5, '35-39': 6, '40-44': 7, '45-49': 8, '50-': 9}
 
-        full_list = self.item['article_id'].values.tolist()
-
-        self.image_feature_dict, self.distcnts = make_features_and_distcnt(root_dir,self.features_model, full_list, 'features.pkl', 'distr_cnt.pkl')
-        print('count history')
-        history_num = []
-        log_num = 10000*10
-        history_sel_num = 1
-        top_history1 = []
-        total_list_article=[]
-        for idx in range(self.item.shape[0]):
-            if(idx%log_num==0):
-                print('count process',idx, '/',self.item.shape[0])
-            cur_article = self.item['read_article_ids'].loc[idx]
-            if type(cur_article) == str:
-                list_article = cur_article.split(',')
-                total_list_article.extend(list_article)
-                top_history1.append(list_article[0])
-            else:
-                list_article = []
-                top_history1.append("")
-
-            history_num.append(len(list_article))
-            #get_item_count_max(list_article)
-        self.history_feature_dict, self.history_distcnts = make_features_and_distcnt(self.features_model, total_list_article, 'history_features.pkl', 'history_distr_cnt.pkl')
-        self.item['history_num'] = pd.Series(history_num, index=self.item.index)
-        print('self.item print')
         for c in self.item.columns:
             print(c)
             print(self.item[c].head(10))
@@ -148,33 +152,8 @@ class AiRushDataGenerator(keras.utils.Sequence):
     def __len__(self):
         return len(self.item)
 
-    def get_hist_features(cur_article=None, sel_shuffle=False, out_shape=2048):
-        if type(cur_article) == str:
-            list_article = cur_article.split(',')
-        else:
-            list_article = []
-    
-        sel_number=self.hist_maxuse_num
-        if sel_number > len(list_article):
-            sel_number = len(list_article)
-
-        if sel_shuffle==True:
-            sel_article = random.choices(list_article, k=sel_number)
-        else:
-            sel_article = list_article[:sel_number]
-        hist_features = []
-
-        for idx in range(self.hist_maxuse_num):
-            if idx<sel_number:
-                cnn_feature = self.history_feature_dict[sel_article[idx]]
-                hist_features.append(cnn_feature)
-            else:
-                hist_features.append(np.zeros(out_shape))
-
-        mer_hist_np = np.array(hist_features)
-        return mer_hist_np.flatten()
-
     def __getitem__(self, index):
+        print(index)
         'Generate one batch of data'
         # Generate indexes of the batch
         idxs = self.indexes[index*self.batch_size:(index+1)*self.batch_size]
@@ -182,7 +161,8 @@ class AiRushDataGenerator(keras.utils.Sequence):
         return X, y
 
     def __data_generation(self, idxs):
-        X = np.empty((self.batch_size, 2048))
+        print(idxs)
+        X = np.empty((self.batch_size, 2600))
         y = np.empty((self.batch_size), dtype=int)
         # Generate data
         for i, idx in enumerate(idxs):
@@ -191,8 +171,9 @@ class AiRushDataGenerator(keras.utils.Sequence):
 
     
     def get_one_data(self, idx):
-        article_id, hh, gender, age_range, read_article_ids,history_num  = self.item.loc[idx
-                       , ['article_id', 'hh', 'gender', 'age_range', 'read_article_ids','history_num']]
+        article_id, hh, gender, age_range, read_article_ids,history_num,history_dupicate_top1  = self.item.loc[idx
+                       , ['article_id', 'hh', 'gender', 'age_range', 'read_article_ids','history_num','history_dupicate_top1']]
+
         if self.mode== 'train':
             label = self.label.loc[idx, ['label']]
             label = np.array(label, dtype=np.float32)
@@ -214,10 +195,32 @@ class AiRushDataGenerator(keras.utils.Sequence):
         label_onehot = np.zeros((24), dtype=np.float32)
         label_onehot[time - 1] = 1
         flat_features.extend(label_onehot)
-        mer_hist_np = self.get_hist_features(cur_article=read_article_ids, sel_shuffle=self.shuffle, out_shape=extracted_image_feature.shape)
-        flat_features.extend(extracted_image_feature)
-        flat_features.extend(mer_hist_np)
+        flat_features.append(history_num) #history number add
+
+        flat_features.append(self.distcnts[article_id]) #base article이 base aritcle set에는 몇개나?
+
+        try:
+            flat_features.append(self.history_distcnts[article_id]) #base article이 history article에는 몇개나?
+        except:
+            flat_features.append(0)
+
+        try:
+            flat_features.append(self.history_distcnts[history_dupicate_top1]) #history article이 history article set에는 몇개나?
+        except:
+            flat_features.append(0)
+        try:
+            flat_features.append(self.distcnts[history_dupicate_top1]) #history article이 base set article에는 몇개나?
+        except:
+            flat_features.append(0)
+
+        if history_dupicate_top1 == "NoDup":
+            history_feature = np.zeros(extracted_image_feature.shape) #history article의 feature 이미지가 없음..
+        else:
+            history_feature = self.image_feature_dict[history_dupicate_top1] #history article의 feature
+            
         flat_features = np.array(flat_features).flatten()
+        flat_features =np.concatenate((flat_features, extracted_image_feature), axis=None)
+        flat_features =np.concatenate((flat_features, history_feature), axis=None)
         # hint: flat features are concatened into a Tensor, because I wanted to put them all into computational model,
         # hint: if it is not what you wanted, then change the last return line
         return flat_features, label

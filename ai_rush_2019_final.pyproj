@@ -39,6 +39,9 @@
     <Compile Include="Resnet_feature_extractor.py" />
     <Compile Include="setup.py" />
     <Compile Include="submit.py" />
+    <Compile Include="temp_others.py">
+      <SubType>Code</SubType>
+    </Compile>
     <Compile Include="utils.py" />
   </ItemGroup>
   <ItemGroup>
