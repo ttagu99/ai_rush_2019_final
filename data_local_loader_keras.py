@@ -31,7 +31,7 @@ from keras.preprocessing import image
 from keras.applications.mobilenetv2 import preprocess_input
 
 
-def build_cnn_model(backbone= MobileNetV2, input_shape =  (224,224,3), use_imagenet = None, base_freeze=True):
+def build_cnn_model(backbone= MobileNetV2, input_shape =  (224,224,3), use_imagenet = 'imagenet', base_freeze=True):
     base_model = backbone(input_shape=input_shape, weights=use_imagenet, include_top= False)#, classes=NCATS)
     x = base_model.output
     gap_x = GlobalAveragePooling2D()(x)
@@ -129,7 +129,6 @@ class AiRushDataGenerator(keras.utils.Sequence):
         self.label = label
         self.item = item
         self.indexes = self.item.index.values.tolist()
-        print(self.indexes)
         #self.n = 0
         #self.max = self.item.shape[0]//self.batch_size
         self.mode = mode
@@ -150,10 +149,10 @@ class AiRushDataGenerator(keras.utils.Sequence):
             print(self.item[c].head(10))
 
     def __len__(self):
-        return len(self.item)
+        'Denotes the number of batches per epoch'
+        return int(np.ceil(len(self.item) / float(self.batch_size)))
 
     def __getitem__(self, index):
-        print(index)
         'Generate one batch of data'
         # Generate indexes of the batch
         idxs = self.indexes[index*self.batch_size:(index+1)*self.batch_size]
@@ -161,25 +160,25 @@ class AiRushDataGenerator(keras.utils.Sequence):
         return X, y
 
     def __data_generation(self, idxs):
-        print(idxs)
         X = np.empty((self.batch_size, 2600))
         y = np.empty((self.batch_size), dtype=int)
         # Generate data
         for i, idx in enumerate(idxs):
             # Store sample
             X[i,] ,  y[i] = self.get_one_data(idx)
+        return X,y
 
     
     def get_one_data(self, idx):
         article_id, hh, gender, age_range, read_article_ids,history_num,history_dupicate_top1  = self.item.loc[idx
                        , ['article_id', 'hh', 'gender', 'age_range', 'read_article_ids','history_num','history_dupicate_top1']]
 
-        if self.mode== 'train':
-            label = self.label.loc[idx, ['label']]
-            label = np.array(label, dtype=np.float32)
-        else:
-            # pseudo label for test mode
-            label = np.array(0, dtype=np.float32)
+        #if self.mode== 'train' or self.mode=='valid':
+        label = self.label.loc[idx,['label']]
+        label = np.array(label, dtype=np.float32)
+        #else:
+        #    # pseudo label for test mode
+        #    label = np.array(0, dtype=np.float32)
         extracted_image_feature = self.image_feature_dict[article_id]
         # Additional info for feeding FC layer
         flat_features = []

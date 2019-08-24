@@ -55,16 +55,12 @@ use_nsml = True
 def bind_nsml(model):
     def save(dir_name):
         os.makedirs(dir_name, exist_ok=True)
-        model.save_weights(os.path.join(dir_name, 'model.h5'))
-        print('model saved!', os.path.join(dir_name, 'model.h5'))
-        #joblib.dump(gbm_model,  os.path.join(dir_name, 'gbm_model.pkl'))
-        #print('gbm_model saved!', os.path.join(dir_name, 'gbm_model.pkl'))
-    def load(dir_name):
-        model.load_weights(os.path.join(dir_name, 'model.h5'))
-        print('model loaded!', os.path.join(dir_name, 'model.h5'))
-        #gbm_model = joblib.load( os.path.join(dir_name, 'gbm_model.pkl'))
-        #print('gbm_model loaded!',  os.path.join(dir_name, 'gbm_model.pkl'))
-        print('loaded model checkpoints...!')
+        model.save_weights(os.path.join(dir_name, 'model'))
+        print('model saved!')
+
+    def load(file_path):
+        model.load_weights(file_path)
+        print('model loaded!')
 
     def infer(root):
         pass
@@ -109,8 +105,14 @@ def _infer(root, phase, model, task):
     #return y_pred
 
 def build_model(input_feature_num):
-    inp = Input(shape=(input_feature_num,1))
-    x = Dense(128, activation="relu")(inp)
+    inp = Input(shape=(input_feature_num,))
+    x = BatchNormalization(name = 'batchnormal_in')(inp)
+    x = Dense(512, activation="relu")(inp)
+    x = Dropout(0.5)(x)
+    x = BatchNormalization()(x)
+    x = Dense(512, activation="relu")(x)
+    x = Dropout(0.5)(x)
+    x = Dense(512, activation="relu")(x)
     x = Dense(1, activation="sigmoid")(x)
     model = Model(inputs=inp, outputs=x)
     model.compile(loss='binary_crossentropy', optimizer='adam', metrics=['accuracy'])
@@ -123,15 +125,15 @@ def search_file(search_path):
 
 
 class report_nsml(keras.callbacks.Callback):
-    def __init__(self, prefix, seed):
+    def __init__(self, prefix):
         'Initialization'
         self.prefix = prefix
-        self.seed = seed
     def on_epoch_end(self, epoch, logs={}):
         nsml.report(summary=True, epoch=epoch, loss=logs.get('loss'), val_loss=logs.get('val_loss'),acc=logs.get('acc'),val_acc=logs.get('val_acc'))
-        nsml.save(self.prefix +'_'+ str(self.seed)+'_' +str(epoch))
+        nsml.save(self.prefix +'_' +str(epoch))
 
 def main(args):   
+    batch_size = 1000
     search_file(DATASET_PATH)
     feature_ext_model = build_cnn_model()
     model = build_model(2600)
@@ -160,7 +162,7 @@ def main(args):
     print('train label csv')
     print(label.head())
 
-    debug=1*1000
+    debug=None#10*10000
     if debug is not None:
         item= item[:debug]
         label = label[:debug]
@@ -193,7 +195,7 @@ def main(args):
     item['history_dupicate_top1'] = pd.Series(history_dupicate_top1, index=item.index)
     print('preprocess item.shape', item.shape)
     print(item.head())
-
+    print(item.columns)
     #only train set's article
     img_features, img_distcnts = make_features_and_distcnt(os.path.join(DATASET_PATH, 'train', 'train_data', 'train_image'),feature_ext_model
                                                                         ,article_list, 'features.pkl', 'distr_cnt.pkl')
@@ -204,108 +206,59 @@ def main(args):
           ,train_df.shape, valid_df.shape, train_dfy.shape, valid_dfy.shape)
     # Generators
     root=os.path.join(DATASET_PATH, 'train', 'train_data', 'train_image')
-    training_generator = AiRushDataGenerator(root, train_df, label=train_dfy,shuffle=False,batch_size=1,mode='train'
+    training_generator = AiRushDataGenerator(root, train_df, label=train_dfy,shuffle=False,batch_size=batch_size,mode='train'
                                              , image_feature_dict=img_features,distcnts = img_distcnts, history_distcnts=history_distcnts)
-    validation_generator = AiRushDataGenerator(root, valid_df, label=valid_dfy,shuffle=False,batch_size=1,mode='valid'
+    validation_generator = AiRushDataGenerator(root, valid_df, label=valid_dfy,shuffle=False,batch_size=batch_size,mode='valid'
                                               ,image_feature_dict=img_features,distcnts = img_distcnts,history_distcnts=history_distcnts)
 
     model.summary()
 
+    """ Callback """
+    monitor = 'val_loss'
+    best_model_path = 'dgu_model.h5'
+    reduce_lr = ReduceLROnPlateau(monitor=monitor, patience=5,factor=0.2,verbose=1)
+    early_stop = EarlyStopping(monitor=monitor, patience=9)
+    checkpoint = ModelCheckpoint(best_model_path,monitor=monitor,verbose=1,save_best_only=True)
+    report = report_nsml(prefix = 'secls')
+    callbacks = [reduce_lr,early_stop,checkpoint,report]
+
+
     # Train model on dataset
-    model.fit_generator(generator=training_generator,   epochs=1,
+    model.fit_generator(generator=training_generator,   epochs=100,
                         validation_data=validation_generator,
-                        use_multiprocessing=False,
-                        workers=1)
+                        use_multiprocessing=True,
+                        workers=4, callbacks=callbacks)
     #eda_set = next(training_generator)
     #print(len(eda_set), eda_set[0].shape, eda_set[1].shape)
 
 
-    nsml.save('last')
-        ## Create the grid
-        #grid = GridSearchCV(gbm_model, gridParams,
-        #                    verbose=1,
-        #                    cv=4,
-        #                    n_jobs=2)
-        ## Run the grid
-        #grid.fit(TotalX, TotalY)
-
-        ## Print the best parameters found
-        #print(grid.best_params_)
-        #print(grid.best_score_)
-
-    #    for epoch in range(args.num_epochs):
-    #        for i, data in enumerate(train_loader):
-    #            images, extracted_image_features, labels, flat_features = data
-
-    #            images = images.cuda()
-    #            extracted_image_features = extracted_image_features.cuda()
-    #            flat_features = flat_features.cuda()
-    #            labels = labels.cuda()
-
-    #            # forward
-    #            if args.arch == 'MLP':
-    #                logits = model(extracted_image_features, flat_features)
-    #            elif args.arch == 'Resnet':
-    #                logits = model(images, flat_features)
-    #            criterion = nn.MSELoss()
-    #            loss = torch.sqrt(criterion(logits.squeeze(), labels.float()))
-
-    #            # backward and optimize
-    #            optimizer.zero_grad()
-    #            loss.backward()
-    #            optimizer.step()
-
-    #            if loss < best_loss:
-    #                nsml.save('best_loss')  # this will save your best model on nsml.
-
-
-
-    #            if i % args.print_every == 0:
-    #                elapsed = datetime.datetime.now() - start_time
-    #                print('Elapsed [%s], Epoch [%i/%i], Step [%i/%i], Loss: %.4f'
-    #                      % (elapsed, epoch + 1, args.num_epochs, i + 1, iter_per_epoch, loss.item()))
-    #            #if i % args.save_step_every == 0:
-    #            #    # print('debug ] save testing purpose')
-    #            #    nsml.save('step_' + str(i))  # this will save your current model on nsml.
-
-    #        if epoch % args.save_epoch_every == 0:
-    #            nsml.report(
-    #                summary=True,
-    #                step=epoch,
-    #                scope=locals(),
-    #                **{
-    #                "Loss": loss.item(),
-    #                })
-
-    #            nsml.save('epoch_' + str(epoch))  # this will save your current model on nsml.
-    #nsml.save('final')
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--num_workers', type=int, default=0)  # not work. check built_in_args in data_local_loader.py
+    #parser.add_argument('--num_workers', type=int, default=0)  # not work. check built_in_args in data_local_loader.py
 
-    parser.add_argument('--train_path', type=str, default='train/train_data/train_data')
-    parser.add_argument('--test_path', type=str, default='test/test_data/test_data')
-    parser.add_argument('--test_tf', type=str, default='[transforms.Resize((456, 232))]')
-    parser.add_argument('--train_tf', type=str, default='[transforms.Resize((456, 232))]')
+    #parser.add_argument('--train_path', type=str, default='train/train_data/train_data')
+    #parser.add_argument('--test_path', type=str, default='test/test_data/test_data')
+    #parser.add_argument('--test_tf', type=str, default='[transforms.Resize((456, 232))]')
+    #parser.add_argument('--train_tf', type=str, default='[transforms.Resize((456, 232))]')
 
-    parser.add_argument('--use_sex', type=bool, default=True)
-    parser.add_argument('--use_age', type=bool, default=True)
-    parser.add_argument('--use_exposed_time', type=bool, default=True)
-    parser.add_argument('--use_read_history', type=bool, default=False)
+    #parser.add_argument('--use_sex', type=bool, default=True)
+    #parser.add_argument('--use_age', type=bool, default=True)
+    #parser.add_argument('--use_exposed_time', type=bool, default=True)
+    #parser.add_argument('--use_read_history', type=bool, default=False)
 
-    parser.add_argument('--num_epochs', type=int, default=10)#1)
-    parser.add_argument('--batch_size', type=int, default=350)#2048)
-    parser.add_argument('--num_classes', type=int, default=1)
-    parser.add_argument('--task', type=str, default='ctrpred')
-    parser.add_argument('--lr', type=float, default=1e-3)
-    parser.add_argument('--print_every', type=int, default=10)
-    parser.add_argument('--save_epoch_every', type=int, default=1)
-    parser.add_argument('--save_step_every', type=int, default=1000)#)1000)
+    #parser.add_argument('--num_epochs', type=int, default=10)#1)
+    #parser.add_argument('--batch_size', type=int, default=350)#2048)
+    #parser.add_argument('--num_classes', type=int, default=1)
+    #parser.add_argument('--task', type=str, default='ctrpred')
+    #parser.add_argument('--lr', type=float, default=1e-3)
+    #parser.add_argument('--print_every', type=int, default=10)
+    #parser.add_argument('--save_epoch_every', type=int, default=1)
+    #parser.add_argument('--save_step_every', type=int, default=1000)#)1000)
 
-    parser.add_argument('--use_gpu', type=bool, default=True)
-    parser.add_argument("--arch", type=str, default="Resnet")#"MLP")#"Resnet")
+    #parser.add_argument('--use_gpu', type=bool, default=True)
+    #parser.add_argument("--arch", type=str, default="Resnet")#"MLP")#"Resnet")
 
     # reserved for nsml
     parser.add_argument("--mode", type=str, default="train")
