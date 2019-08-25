@@ -8,6 +8,9 @@ setup(
             'tqdm',
             'torch>=1.0',
             'lightgbm',
+            #'TensorFlow >= 1.12.0',
+            'scikit-image',
+            'keras_applications >= 1.0.7',
             'efficientnet==0.0.4'
             #'pickle-mixin',
             #'torchvision',

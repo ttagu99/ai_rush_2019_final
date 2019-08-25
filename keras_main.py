@@ -10,6 +10,7 @@ from data_loader import feed_infer
 from evaluation import evaluation_metrics
 import nsml
 import keras
+import tensorflow as tf
 from keras.models import Sequential
 from keras.layers import Concatenate
 from keras.layers import Dense, Dropout, Flatten, Activation,Average
@@ -23,6 +24,7 @@ from keras.applications.resnet50 import ResNet50
 from keras.applications.nasnet import NASNetLarge
 from keras.applications.mobilenetv2 import MobileNetV2
 from keras.applications.inception_resnet_v2 import InceptionResNetV2
+from efficientnet import EfficientNetB0
 from keras.models import Model,load_model
 from keras.optimizers import Adam, SGD
 from sklearn.model_selection import train_test_split
@@ -52,7 +54,10 @@ DATASET_PATH = os.path.join(nsml.DATASET_PATH)
 print('start using nsml...!')
 print('DATASET_PATH: ', DATASET_PATH)
 use_nsml = True
-batch_size = 10000
+batch_size = 2000
+CNN_BACKBONE =MobileNetV2
+debug=None#100000#None
+
 def bind_nsml(feature_ext_model, model, task):
     def save(dir_name):
         os.makedirs(dir_name, exist_ok=True)
@@ -86,32 +91,7 @@ def _infer(root, phase, model, task, feature_ext_model):
     print('item.shap', item.shape)
     print(item.head(10))
 
-    article_list = item['article_id'].values.tolist()
-    rm_dup_artilcle = list(set(article_list))
-    history_sel_num = 1
-    total_list_article=[]
-    history_dupicate_top1=[]
-    history_num = []
-    log_num = 10000*10
-    for cnt, idx in enumerate(item.index.to_list()):
-        if(cnt%log_num==0):
-            print('count process',cnt, '/',item.shape[0])
-        cur_article = item['read_article_ids'].loc[idx]
-        hist_top = "NoDup"
-        if type(cur_article) == str:
-            list_article = cur_article.split(',')
-            total_list_article.extend(list_article)    
-            for hist_article in list_article:
-                if hist_article in rm_dup_artilcle:
-                    hist_top = hist_article
-                    break
-        else:
-            list_article = []
-        history_dupicate_top1.append(hist_top)
-
-        history_num.append(len(list_article))
-    item['history_num'] = pd.Series(history_num, index=item.index)
-    item['history_dupicate_top1'] = pd.Series(history_dupicate_top1, index=item.index)
+    item,article_list,total_list_article = count_process(item)
 
     #only test set's article
     img_features, img_distcnts = make_features_and_distcnt(os.path.join(DATASET_PATH, 'test', 'test_data', 'test_image'),feature_ext_model
@@ -140,8 +120,6 @@ def build_model(input_feature_num):
     x = Dense(512, activation="relu")(x)
     x = Dense(1, activation="sigmoid")(x)
     model = Model(inputs=inp, outputs=x)
-    model.compile(loss='binary_crossentropy', optimizer='adam', metrics=['accuracy'])
-    model.summary()     
     return model
 
 def search_file(search_path):
@@ -149,20 +127,83 @@ def search_file(search_path):
         print(subdir,len(files))
 
 
+def count_process(item):
+    article_list = item['article_id'].values.tolist()
+    rm_dup_artilcle = list(set(article_list))
+    history_sel_num = 1
+    total_list_article=[]
+    history_dupicate_top1=[]
+    history_num = []
+    log_num = 10000*10
+    for cnt, idx in enumerate(item.index.to_list()):
+        if(cnt%log_num==0):
+            print('count process',cnt, '/',item.shape[0])
+        cur_article = item['read_article_ids'].loc[idx]
+        hist_top = "NoDup"
+        if type(cur_article) == str:
+            list_article = cur_article.split(',')
+            total_list_article.extend(list_article)    
+            for hist_article in list_article:  # so long~
+                if hist_article in rm_dup_artilcle:
+                    hist_top = hist_article
+                    break
+        else:
+            list_article = []
+        history_dupicate_top1.append(hist_top)
+
+        history_num.append(len(list_article))
+    item['history_num'] = pd.Series(history_num, index=item.index)
+    item['history_dupicate_top1'] = pd.Series(history_dupicate_top1, index=item.index)
+    return item,article_list,total_list_article
+
+def f1_score(y_true, y_pred):
+    y_pred = K.round(y_pred)
+    tp = K.sum(K.cast(y_true*y_pred, 'float'), axis=0)
+    # tn = K.sum(K.cast((1-y_true)*(1-y_pred), 'float'), axis=0)
+    fp = K.sum(K.cast((1-y_true)*y_pred, 'float'), axis=0)
+    fn = K.sum(K.cast(y_true*(1-y_pred), 'float'), axis=0)
+    p = tp / (tp + fp + K.epsilon())
+    r = tp / (tp + fn + K.epsilon())
+    f1 = 2*p*r / (p+r+K.epsilon())
+    f1 = tf.where(tf.is_nan(f1), tf.zeros_like(f1), f1)
+    return K.mean(f1)
+
+def f1_loss(y_true, y_pred):
+    tp = K.sum(K.cast(y_true*y_pred, 'float'), axis=0)
+    tn = K.sum(K.cast((1-y_true)*(1-y_pred), 'float'), axis=0)
+    fp = K.sum(K.cast((1-y_true)*y_pred, 'float'), axis=0)
+    fn = K.sum(K.cast(y_true*(1-y_pred), 'float'), axis=0)
+    p = tp / (tp + fp + K.epsilon())
+    r = tp / (tp + fn + K.epsilon())
+    f1 = 2*p*r / (p+r+K.epsilon())
+    f1 = tf.where(tf.is_nan(f1), tf.zeros_like(f1), f1)
+    return 1 - K.mean(f1)
+
+def KerasFocalLoss(target, input):
+    gamma = 2.
+    input = tf.cast(input, tf.float32)
+    max_val = K.clip(-input, 0, 1)
+    loss = input - input * target + max_val + K.log(K.exp(-max_val) + K.exp(-input - max_val))
+    invprobs = tf.log_sigmoid(-input * (target * 2.0 - 1.0))
+    loss = K.exp(invprobs * gamma) * loss
+    return K.mean(K.sum(loss, axis=1))
+
 class report_nsml(keras.callbacks.Callback):
     def __init__(self, prefix):
         'Initialization'
         self.prefix = prefix
     def on_epoch_end(self, epoch, logs={}):
-        nsml.report(summary=True, epoch=epoch, loss=logs.get('loss'), val_loss=logs.get('val_loss'),acc=logs.get('acc'),val_acc=logs.get('val_acc'))
+        nsml.report(summary=True, epoch=epoch, loss=logs.get('loss'), val_loss=logs.get('val_loss')
+                    ,acc=logs.get('acc'),val_acc=logs.get('val_acc')
+                    ,f1_score=logs.get('f1_score'),val_f1_score=logs.get('val_f1_score'))
         nsml.save(self.prefix +'_' +str(epoch))
 
 def main(args):   
     search_file(DATASET_PATH)
     if args.mode == 'train':
-        feature_ext_model = build_cnn_model()
+        feature_ext_model = build_cnn_model(backbone=CNN_BACKBONE)
     else:
-        feature_ext_model = build_cnn_model(use_imagenet=None)
+        feature_ext_model = build_cnn_model(backbone=CNN_BACKBONE,use_imagenet=None)
     model = build_model(2600)
     print('feature_ext_model.output.shape[1]',feature_ext_model.output.shape[1])
     if use_nsml:
@@ -190,39 +231,13 @@ def main(args):
         print(label.head())
 
 
-        debug=None
+
         if debug is not None:
             item= item[:debug]
             label = label[:debug]
         #class_weights = class_weight.compute_class_weight('balanced',  np.unique(label),   label)
         #print('class_weights',class_weights)
-
-        article_list = item['article_id'].values.tolist()
-        rm_dup_artilcle = list(set(article_list))
-        history_sel_num = 1
-        total_list_article=[]
-        history_dupicate_top1=[]
-        history_num = []
-        log_num = 10000*10
-        for cnt, idx in enumerate(item.index.to_list()):
-            if(cnt%log_num==0):
-                print('count process',cnt, '/',item.shape[0])
-            cur_article = item['read_article_ids'].loc[idx]
-            hist_top = "NoDup"
-            if type(cur_article) == str:
-                list_article = cur_article.split(',')
-                total_list_article.extend(list_article)    
-                for hist_article in list_article:
-                    if hist_article in rm_dup_artilcle:
-                        hist_top = hist_article
-                        break
-            else:
-                list_article = []
-            history_dupicate_top1.append(hist_top)
-
-            history_num.append(len(list_article))
-        item['history_num'] = pd.Series(history_num, index=item.index)
-        item['history_dupicate_top1'] = pd.Series(history_dupicate_top1, index=item.index)
+        item,article_list,total_list_article = count_process(item)
         print('preprocess item.shape', item.shape)
         print(item.head())
         print(item.columns)
@@ -238,20 +253,23 @@ def main(args):
         #root=os.path.join(DATASET_PATH, 'train', 'train_data', 'train_image')
         training_generator = AiRushDataGenerator( train_df, label=train_dfy,shuffle=False,batch_size=batch_size,mode='train'
                                                  , image_feature_dict=img_features,distcnts = img_distcnts, history_distcnts=history_distcnts)
-        validation_generator = AiRushDataGenerator( valid_df, label=valid_dfy,shuffle=False,batch_size=batch_size,mode='valid'
+        validation_generator = AiRushDataGenerator( valid_df, label=valid_dfy,shuffle=False,batch_size=batch_size//20,mode='valid'
                                                   ,image_feature_dict=img_features,distcnts = img_distcnts,history_distcnts=history_distcnts)
 
+
+        metrics=['accuracy',f1_score]
+        model.compile(loss=f1_loss, optimizer='adam', metrics=metrics)
         model.summary()
 
         """ Callback """
-        monitor = 'val_loss'
+        monitor = 'val_f1_score'
         best_model_path = 'dgu_model.h5'
         reduce_lr = ReduceLROnPlateau(monitor=monitor, patience=5,factor=0.2,verbose=1)
         early_stop = EarlyStopping(monitor=monitor, patience=9)
-        checkpoint = ModelCheckpoint(best_model_path,monitor=monitor,verbose=1,save_best_only=True)
-        report = report_nsml(prefix = 'secls')
-        callbacks = [reduce_lr,early_stop,checkpoint,report]
 
+        #checkpoint = ModelCheckpoint(best_model_path,monitor=monitor,verbose=1,save_best_only=True)
+        report = report_nsml(prefix = 'dgu')
+        callbacks = [reduce_lr,early_stop,report]
 
         # Train model on dataset
         model.fit_generator(generator=training_generator,   epochs=100, #class_weight=class_weights,

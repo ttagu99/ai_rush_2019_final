@@ -23,13 +23,13 @@ from keras.applications.resnet50 import ResNet50
 from keras.applications.nasnet import NASNetLarge
 from keras.applications.mobilenetv2 import MobileNetV2
 from keras.applications.inception_resnet_v2 import InceptionResNetV2
+from efficientnet import EfficientNetB0
 from keras.models import Model,load_model
 from keras.optimizers import Adam, SGD
 from sklearn.model_selection import train_test_split
 import random
 from keras.preprocessing import image
 from keras.applications.mobilenetv2 import preprocess_input
-
 
 def build_cnn_model(backbone= MobileNetV2, input_shape =  (224,224,3), use_imagenet = 'imagenet', base_freeze=True):
     base_model = backbone(input_shape=input_shape, weights=use_imagenet, include_top= False)#, classes=NCATS)
