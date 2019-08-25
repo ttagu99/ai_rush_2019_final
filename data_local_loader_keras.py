@@ -119,7 +119,7 @@ else:
 
 
 class AiRushDataGenerator(keras.utils.Sequence):
-    def __init__(self,  root_dir,  item, label=None,
+    def __init__(self,  item, label=None,
                  transform=None,shuffle=False,batch_size=200,mode='train' #, features_model=None
                  , image_feature_dict=None, distcnts=None, history_distcnts = None
                  ):
@@ -132,7 +132,7 @@ class AiRushDataGenerator(keras.utils.Sequence):
         #self.n = 0
         #self.max = self.item.shape[0]//self.batch_size
         self.mode = mode
-        self.root_dir = root_dir
+        #self.root_dir = root_dir
         self.transform = transform
         self.hist_maxuse_num = 1
         #self.features_model = features_model
@@ -173,12 +173,12 @@ class AiRushDataGenerator(keras.utils.Sequence):
         article_id, hh, gender, age_range, read_article_ids,history_num,history_dupicate_top1  = self.item.loc[idx
                        , ['article_id', 'hh', 'gender', 'age_range', 'read_article_ids','history_num','history_dupicate_top1']]
 
-        #if self.mode== 'train' or self.mode=='valid':
-        label = self.label.loc[idx,['label']]
-        label = np.array(label, dtype=np.float32)
-        #else:
-        #    # pseudo label for test mode
-        #    label = np.array(0, dtype=np.float32)
+        if self.mode== 'train' or self.mode=='valid':
+            label = self.label.loc[idx,['label']]
+            label = np.array(label, dtype=np.float32)
+        else:
+            # pseudo label for test mode
+            label = np.array(0, dtype=np.float32)
         extracted_image_feature = self.image_feature_dict[article_id]
         # Additional info for feeding FC layer
         flat_features = []

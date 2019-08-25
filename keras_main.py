@@ -52,26 +52,29 @@ DATASET_PATH = os.path.join(nsml.DATASET_PATH)
 print('start using nsml...!')
 print('DATASET_PATH: ', DATASET_PATH)
 use_nsml = True
-
-def bind_nsml(model):
+batch_size = 5000
+def bind_nsml(feature_ext_model, model, task):
     def save(dir_name):
         os.makedirs(dir_name, exist_ok=True)
-        model.save_weights(os.path.join(dir_name, 'model'))
+        feature_ext_model.save_weights(os.path.join(dir_name, 'feature_ext_model.h5'))
+        model.save_weights(os.path.join(dir_name, 'model.h5'))
         print('model saved!')
 
-    def load(file_path):
-        model.load_weights(file_path)
+    def load(dir_name):
+        feature_ext_model.load_weights(os.path.join(dir_name, 'feature_ext_model.h5'))
+        model.load_weights(os.path.join(dir_name, 'model.h5'))
         print('model loaded!')
 
-    def infer():
-        return _infer()
+    def infer(root, phase):
+        return _infer(root, phase, model=model, task=task, feature_ext_model = feature_ext_model)
 
     nsml.bind(save=save, load=load, infer=infer)
-    print('bind_nsml(cnn_model,gbm_model)')
+    print('bind_nsml(model)')
 
 
-def _infer():
-    csv_file = os.path.join(csv_file, 'test', 'test_data', 'test_data')
+def _infer(root, phase, model, task, feature_ext_model):
+    print('_infer root - : ', root)
+    csv_file = os.path.join(root, 'test', 'test_data', 'test_data')
     item = pd.read_csv(csv_file,
                             dtype={
                                 'article_id': str,
@@ -82,10 +85,47 @@ def _infer():
 
     print('item.shap', item.shape)
     print(item.head(10))
+
+    article_list = item['article_id'].values.tolist()
+    rm_dup_artilcle = list(set(article_list))
+    history_sel_num = 1
+    total_list_article=[]
+    history_dupicate_top1=[]
+    history_num = []
+    log_num = 10000*10
+    for cnt, idx in enumerate(item.index.to_list()):
+        if(cnt%log_num==0):
+            print('count process',cnt, '/',item.shape[0])
+        cur_article = item['read_article_ids'].loc[idx]
+        hist_top = "NoDup"
+        if type(cur_article) == str:
+            list_article = cur_article.split(',')
+            total_list_article.extend(list_article)    
+            for hist_article in list_article:
+                if hist_article in rm_dup_artilcle:
+                    hist_top = hist_article
+                    break
+        else:
+            list_article = []
+        history_dupicate_top1.append(hist_top)
+
+        history_num.append(len(list_article))
+    item['history_num'] = pd.Series(history_num, index=item.index)
+    item['history_dupicate_top1'] = pd.Series(history_dupicate_top1, index=item.index)
+
+    #only test set's article
+    img_features, img_distcnts = make_features_and_distcnt(os.path.join(DATASET_PATH, 'test', 'test_data', 'test_image'),feature_ext_model
+                                                                        ,article_list, 'features.pkl', 'distr_cnt.pkl')
+    #only test history cnts
+    history_distcnts = make_history_distcnt(total_list_article, 'history_distr_cnt.pkl')
+
+    test_generator = AiRushDataGenerator( item, label=None,shuffle=False,batch_size=batch_size,mode='test'
+                                             , image_feature_dict=img_features,distcnts = img_distcnts, history_distcnts=history_distcnts)
+
     y_pred = []
 
     for i in item:
-        y_pred.append(0)
+        y_pred.append(0.5)
 
     return y_pred
     # root : csv file path
@@ -138,104 +178,103 @@ class report_nsml(keras.callbacks.Callback):
         nsml.save(self.prefix +'_' +str(epoch))
 
 def main(args):   
-    batch_size = 1000
     search_file(DATASET_PATH)
     feature_ext_model = build_cnn_model()
     model = build_model(2600)
     print('feature_ext_model.output.shape[1]',feature_ext_model.output.shape[1])
     if use_nsml:
-        bind_nsml(model)
+        bind_nsml(feature_ext_model, model, args.task)
     if args.pause:
         nsml.paused(scope=locals())
+    if args.mode == 'train':
+        csv_file = os.path.join(DATASET_PATH, 'train', 'train_data', 'train_data')
+        item = pd.read_csv(csv_file,
+                                dtype={
+                                    'article_id': str,
+                                    'hh': int, 'gender': str,
+                                    'age_range': str,
+                                    'read_article_ids': str
+                                }, sep='\t')
+        print('item.shape', item.shape)
+        print(item.head())
 
-    csv_file = os.path.join(DATASET_PATH, 'train', 'train_data', 'train_data')
-    item = pd.read_csv(csv_file,
-                            dtype={
-                                'article_id': str,
-                                'hh': int, 'gender': str,
-                                'age_range': str,
-                                'read_article_ids': str
-                            }, sep='\t')
-    print('item.shape', item.shape)
-    print(item.head())
-
-    label_data_path = os.path.join(DATASET_PATH, 'train',
-                                    os.path.basename(os.path.normpath(csv_file)).split('_')[0] + '_label')
-    label = pd.read_csv(label_data_path,
-                                dtype={'label': int},
-                                sep='\t')
-    print('train label csv')
-    print(label.head())
-
-
-    debug=10*10000
-    if debug is not None:
-        item= item[:debug]
-        label = label[:debug]
-    #class_weights = class_weight.compute_class_weight('balanced',  np.unique(label),   label)
-    #print('class_weights',class_weights)
-
-    article_list = item['article_id'].values.tolist()
-    rm_dup_artilcle = list(set(article_list))
-    history_sel_num = 1
-    total_list_article=[]
-    history_dupicate_top1=[]
-    history_num = []
-    log_num = 10000*10
-    for cnt, idx in enumerate(item.index.to_list()):
-        if(cnt%log_num==0):
-            print('count process',cnt, '/',item.shape[0])
-        cur_article = item['read_article_ids'].loc[idx]
-        hist_top = "NoDup"
-        if type(cur_article) == str:
-            list_article = cur_article.split(',')
-            total_list_article.extend(list_article)    
-            for hist_article in list_article:
-                if hist_article in rm_dup_artilcle:
-                    hist_top = hist_article
-                    break
-        else:
-            list_article = []
-        history_dupicate_top1.append(hist_top)
-
-        history_num.append(len(list_article))
-    item['history_num'] = pd.Series(history_num, index=item.index)
-    item['history_dupicate_top1'] = pd.Series(history_dupicate_top1, index=item.index)
-    print('preprocess item.shape', item.shape)
-    print(item.head())
-    print(item.columns)
-    #only train set's article
-    img_features, img_distcnts = make_features_and_distcnt(os.path.join(DATASET_PATH, 'train', 'train_data', 'train_image'),feature_ext_model
-                                                                        ,article_list, 'features.pkl', 'distr_cnt.pkl')
-    #only train history cnts
-    history_distcnts = make_history_distcnt(total_list_article, 'history_distr_cnt.pkl')
-    train_df, valid_df, train_dfy, valid_dfy = train_test_split(item, label, test_size=0.05, random_state=777)#,stratify =label)
-    print('train_df.shape, valid_df.shape, train_dfy.shape, valid_dfy.shape'
-          ,train_df.shape, valid_df.shape, train_dfy.shape, valid_dfy.shape)
-    # Generators
-    root=os.path.join(DATASET_PATH, 'train', 'train_data', 'train_image')
-    training_generator = AiRushDataGenerator(root, train_df, label=train_dfy,shuffle=False,batch_size=batch_size,mode='train'
-                                             , image_feature_dict=img_features,distcnts = img_distcnts, history_distcnts=history_distcnts)
-    validation_generator = AiRushDataGenerator(root, valid_df, label=valid_dfy,shuffle=False,batch_size=batch_size,mode='valid'
-                                              ,image_feature_dict=img_features,distcnts = img_distcnts,history_distcnts=history_distcnts)
-
-    model.summary()
-
-    """ Callback """
-    monitor = 'val_loss'
-    best_model_path = 'dgu_model.h5'
-    reduce_lr = ReduceLROnPlateau(monitor=monitor, patience=5,factor=0.2,verbose=1)
-    early_stop = EarlyStopping(monitor=monitor, patience=9)
-    checkpoint = ModelCheckpoint(best_model_path,monitor=monitor,verbose=1,save_best_only=True)
-    report = report_nsml(prefix = 'secls')
-    callbacks = [reduce_lr,early_stop,checkpoint,report]
+        label_data_path = os.path.join(DATASET_PATH, 'train',
+                                        os.path.basename(os.path.normpath(csv_file)).split('_')[0] + '_label')
+        label = pd.read_csv(label_data_path,
+                                    dtype={'label': int},
+                                    sep='\t')
+        print('train label csv')
+        print(label.head())
 
 
-    # Train model on dataset
-    model.fit_generator(generator=training_generator,   epochs=100, #class_weight=class_weights,
-                        validation_data=validation_generator,
-                        use_multiprocessing=True,
-                        workers=4, callbacks=callbacks)
+        debug=1*10000
+        if debug is not None:
+            item= item[:debug]
+            label = label[:debug]
+        #class_weights = class_weight.compute_class_weight('balanced',  np.unique(label),   label)
+        #print('class_weights',class_weights)
+
+        article_list = item['article_id'].values.tolist()
+        rm_dup_artilcle = list(set(article_list))
+        history_sel_num = 1
+        total_list_article=[]
+        history_dupicate_top1=[]
+        history_num = []
+        log_num = 10000*10
+        for cnt, idx in enumerate(item.index.to_list()):
+            if(cnt%log_num==0):
+                print('count process',cnt, '/',item.shape[0])
+            cur_article = item['read_article_ids'].loc[idx]
+            hist_top = "NoDup"
+            if type(cur_article) == str:
+                list_article = cur_article.split(',')
+                total_list_article.extend(list_article)    
+                for hist_article in list_article:
+                    if hist_article in rm_dup_artilcle:
+                        hist_top = hist_article
+                        break
+            else:
+                list_article = []
+            history_dupicate_top1.append(hist_top)
+
+            history_num.append(len(list_article))
+        item['history_num'] = pd.Series(history_num, index=item.index)
+        item['history_dupicate_top1'] = pd.Series(history_dupicate_top1, index=item.index)
+        print('preprocess item.shape', item.shape)
+        print(item.head())
+        print(item.columns)
+        #only train set's article
+        img_features, img_distcnts = make_features_and_distcnt(os.path.join(DATASET_PATH, 'train', 'train_data', 'train_image'),feature_ext_model
+                                                                            ,article_list, 'features.pkl', 'distr_cnt.pkl')
+        #only train history cnts
+        history_distcnts = make_history_distcnt(total_list_article, 'history_distr_cnt.pkl')
+        train_df, valid_df, train_dfy, valid_dfy = train_test_split(item, label, test_size=0.05, random_state=777)#,stratify =label)
+        print('train_df.shape, valid_df.shape, train_dfy.shape, valid_dfy.shape'
+              ,train_df.shape, valid_df.shape, train_dfy.shape, valid_dfy.shape)
+        # Generators
+        #root=os.path.join(DATASET_PATH, 'train', 'train_data', 'train_image')
+        training_generator = AiRushDataGenerator( train_df, label=train_dfy,shuffle=False,batch_size=batch_size,mode='train'
+                                                 , image_feature_dict=img_features,distcnts = img_distcnts, history_distcnts=history_distcnts)
+        validation_generator = AiRushDataGenerator( valid_df, label=valid_dfy,shuffle=False,batch_size=batch_size,mode='valid'
+                                                  ,image_feature_dict=img_features,distcnts = img_distcnts,history_distcnts=history_distcnts)
+
+        model.summary()
+
+        """ Callback """
+        monitor = 'val_loss'
+        best_model_path = 'dgu_model.h5'
+        reduce_lr = ReduceLROnPlateau(monitor=monitor, patience=5,factor=0.2,verbose=1)
+        early_stop = EarlyStopping(monitor=monitor, patience=9)
+        checkpoint = ModelCheckpoint(best_model_path,monitor=monitor,verbose=1,save_best_only=True)
+        report = report_nsml(prefix = 'secls')
+        callbacks = [reduce_lr,early_stop,checkpoint,report]
+
+
+        # Train model on dataset
+        model.fit_generator(generator=training_generator,   epochs=100, #class_weight=class_weights,
+                            validation_data=validation_generator,
+                            use_multiprocessing=True,
+                            workers=4, callbacks=callbacks)
     #eda_set = next(training_generator)
     #print(len(eda_set), eda_set[0].shape, eda_set[1].shape)
 
