@@ -26,6 +26,7 @@ from keras.applications.inception_resnet_v2 import InceptionResNetV2
 from keras.models import Model,load_model
 from keras.optimizers import Adam, SGD
 from sklearn.model_selection import train_test_split
+from sklearn.utils import class_weight
 from nsml import DATASET_PATH, DATASET_NAME, NSML_NFS_OUTPUT, SESSION_NAME
 #import imgaug as ia
 #from imgaug import augmenters as iaa
@@ -62,14 +63,14 @@ def bind_nsml(model):
         model.load_weights(file_path)
         print('model loaded!')
 
-    def infer(root):
-        pass
+    def infer():
+        return _infer()
 
     nsml.bind(save=save, load=load, infer=infer)
     print('bind_nsml(cnn_model,gbm_model)')
 
 
-def _infer(root, phase, model, task):
+def _infer():
     csv_file = os.path.join(csv_file, 'test', 'test_data', 'test_data')
     item = pd.read_csv(csv_file,
                             dtype={
@@ -81,8 +82,12 @@ def _infer(root, phase, model, task):
 
     print('item.shap', item.shape)
     print(item.head(10))
+    y_pred = []
 
-    pass
+    for i in item:
+        y_pred.append(0)
+
+    return y_pred
     # root : csv file path
     #print('_infer root - : ', root)
     #with torch.no_grad():
@@ -162,10 +167,13 @@ def main(args):
     print('train label csv')
     print(label.head())
 
-    debug=None#10*10000
+
+    debug=10*10000
     if debug is not None:
         item= item[:debug]
         label = label[:debug]
+    #class_weights = class_weight.compute_class_weight('balanced',  np.unique(label),   label)
+    #print('class_weights',class_weights)
 
     article_list = item['article_id'].values.tolist()
     rm_dup_artilcle = list(set(article_list))
@@ -224,7 +232,7 @@ def main(args):
 
 
     # Train model on dataset
-    model.fit_generator(generator=training_generator,   epochs=100,
+    model.fit_generator(generator=training_generator,   epochs=100, #class_weight=class_weights,
                         validation_data=validation_generator,
                         use_multiprocessing=True,
                         workers=4, callbacks=callbacks)
@@ -236,36 +244,36 @@ def main(args):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    #parser.add_argument('--num_workers', type=int, default=0)  # not work. check built_in_args in data_local_loader.py
+    parser.add_argument('--num_workers', type=int, default=0)  # not work. check built_in_args in data_local_loader.py
 
-    #parser.add_argument('--train_path', type=str, default='train/train_data/train_data')
-    #parser.add_argument('--test_path', type=str, default='test/test_data/test_data')
-    #parser.add_argument('--test_tf', type=str, default='[transforms.Resize((456, 232))]')
-    #parser.add_argument('--train_tf', type=str, default='[transforms.Resize((456, 232))]')
+    parser.add_argument('--train_path', type=str, default='train/train_data/train_data')
+    parser.add_argument('--test_path', type=str, default='test/test_data/test_data')
+    parser.add_argument('--test_tf', type=str, default='[transforms.Resize((456, 232))]')
+    parser.add_argument('--train_tf', type=str, default='[transforms.Resize((456, 232))]')
 
-    #parser.add_argument('--use_sex', type=bool, default=True)
-    #parser.add_argument('--use_age', type=bool, default=True)
-    #parser.add_argument('--use_exposed_time', type=bool, default=True)
-    #parser.add_argument('--use_read_history', type=bool, default=False)
+    parser.add_argument('--use_sex', type=bool, default=True)
+    parser.add_argument('--use_age', type=bool, default=True)
+    parser.add_argument('--use_exposed_time', type=bool, default=True)
+    parser.add_argument('--use_read_history', type=bool, default=False)
 
-    #parser.add_argument('--num_epochs', type=int, default=10)#1)
-    #parser.add_argument('--batch_size', type=int, default=350)#2048)
-    #parser.add_argument('--num_classes', type=int, default=1)
-    #parser.add_argument('--task', type=str, default='ctrpred')
-    #parser.add_argument('--lr', type=float, default=1e-3)
-    #parser.add_argument('--print_every', type=int, default=10)
-    #parser.add_argument('--save_epoch_every', type=int, default=1)
-    #parser.add_argument('--save_step_every', type=int, default=1000)#)1000)
+    parser.add_argument('--num_epochs', type=int, default=1)
+    parser.add_argument('--batch_size', type=int, default=2048)
+    parser.add_argument('--num_classes', type=int, default=1)
+    parser.add_argument('--task', type=str, default='ctrpred')
+    parser.add_argument('--lr', type=float, default=1e-3)
+    parser.add_argument('--print_every', type=int, default=10)
+    parser.add_argument('--save_epoch_every', type=int, default=2)
+    parser.add_argument('--save_step_every', type=int, default=1000)
 
-    #parser.add_argument('--use_gpu', type=bool, default=True)
-    #parser.add_argument("--arch", type=str, default="Resnet")#"MLP")#"Resnet")
+    parser.add_argument('--use_gpu', type=bool, default=True)
+    parser.add_argument("--arch", type=str, default="MLP")
 
     # reserved for nsml
     parser.add_argument("--mode", type=str, default="train")
     parser.add_argument("--iteration", type=str, default='0')
     parser.add_argument("--pause", type=int, default=0)
 
-    parser.add_argument('--dry_run', type=bool, default=False)#True)#False)
+    parser.add_argument('--dry_run', type=bool, default=False)
 
     config = parser.parse_args()
     main(config)
