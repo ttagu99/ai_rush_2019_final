@@ -56,7 +56,7 @@ print('DATASET_PATH: ', DATASET_PATH)
 use_nsml = True
 batch_size = 2000
 CNN_BACKBONE =MobileNetV2
-debug=None#100000#None
+debug=10000#None#100000#None
 
 def bind_nsml(feature_ext_model, model, task):
     def save(dir_name):
@@ -125,9 +125,11 @@ def build_model(input_feature_num):
 def search_file(search_path):
     for subdir, dirs, files in os.walk(search_path):
         print(subdir,len(files))
+        if len(files) <10:
+            for file in files:
+                print(file)
 
-
-def count_process(item):
+def count_process(item, category_text):
     article_list = item['article_id'].values.tolist()
     rm_dup_artilcle = list(set(article_list))
     history_sel_num = 1
@@ -154,6 +156,11 @@ def count_process(item):
         history_num.append(len(list_article))
     item['history_num'] = pd.Series(history_num, index=item.index)
     item['history_dupicate_top1'] = pd.Series(history_dupicate_top1, index=item.index)
+    item = pd.merge(item, category_text, how='left', on=['article_id', 'article_id'])
+
+    category_text = category_text.rename(columns={"category_id": "history_category_id"})
+    item = pd.merge(item, category_text, how='left', on=['history_dupicate_top1', 'article_id'])
+
     return item,article_list,total_list_article
 
 def f1_score(y_true, y_pred):
@@ -221,6 +228,23 @@ def main(args):
                                 }, sep='\t')
         print('item.shape', item.shape)
         print(item.head())
+        category_text_file = os.path.join(DATASET_PATH, 'train', 'train_data', 'train_data_article.tsv')
+
+ 
+        category_text = pd.read_csv(category_text_file,
+                                dtype={
+                                    'article_id': str,
+                                    'category_id': int,
+                                    'title': str
+                                }, sep='\t')
+        print('category_text.shape', category_text.shape)
+        print(category_text.head())
+
+        category_text = category_text[['article_id','category_id']]
+        
+
+        print('category_id].values.max()',category_text['category_id'].values.max())
+        print('category_id].values.min()',category_text['category_id'].values.min())
 
         label_data_path = os.path.join(DATASET_PATH, 'train',
                                         os.path.basename(os.path.normpath(csv_file)).split('_')[0] + '_label')
@@ -237,7 +261,7 @@ def main(args):
             label = label[:debug]
         #class_weights = class_weight.compute_class_weight('balanced',  np.unique(label),   label)
         #print('class_weights',class_weights)
-        item,article_list,total_list_article = count_process(item)
+        item,article_list,total_list_article = count_process(item,category_text)
         print('preprocess item.shape', item.shape)
         print(item.head())
         print(item.columns)
@@ -251,7 +275,7 @@ def main(args):
               ,train_df.shape, valid_df.shape, train_dfy.shape, valid_dfy.shape)
         # Generators
         #root=os.path.join(DATASET_PATH, 'train', 'train_data', 'train_image')
-        training_generator = AiRushDataGenerator( train_df, label=train_dfy,shuffle=False,batch_size=batch_size,mode='train'
+        training_generator = AiRushDataGenerator( train_df, label=train_dfy,shuffle=True,batch_size=batch_size,mode='train'
                                                  , image_feature_dict=img_features,distcnts = img_distcnts, history_distcnts=history_distcnts)
         validation_generator = AiRushDataGenerator( valid_df, label=valid_dfy,shuffle=False,batch_size=batch_size//20,mode='valid'
                                                   ,image_feature_dict=img_features,distcnts = img_distcnts,history_distcnts=history_distcnts)
@@ -264,8 +288,8 @@ def main(args):
         """ Callback """
         monitor = 'val_f1_score'
         best_model_path = 'dgu_model.h5'
-        reduce_lr = ReduceLROnPlateau(monitor=monitor, patience=5,factor=0.2,verbose=1)
-        early_stop = EarlyStopping(monitor=monitor, patience=9)
+        reduce_lr = ReduceLROnPlateau(monitor=monitor, patience=5,factor=0.2,verbose=1,mode='max')
+        early_stop = EarlyStopping(monitor=monitor, patience=9,mode='max')
 
         #checkpoint = ModelCheckpoint(best_model_path,monitor=monitor,verbose=1,save_best_only=True)
         report = report_nsml(prefix = 'dgu')
