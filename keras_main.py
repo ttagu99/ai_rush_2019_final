@@ -52,7 +52,7 @@ DATASET_PATH = os.path.join(nsml.DATASET_PATH)
 print('start using nsml...!')
 print('DATASET_PATH: ', DATASET_PATH)
 use_nsml = True
-batch_size = 5000
+batch_size = 10000
 def bind_nsml(feature_ext_model, model, task):
     def save(dir_name):
         os.makedirs(dir_name, exist_ok=True)
@@ -119,35 +119,15 @@ def _infer(root, phase, model, task, feature_ext_model):
     #only test history cnts
     history_distcnts = make_history_distcnt(total_list_article, 'history_distr_cnt.pkl')
 
-    test_generator = AiRushDataGenerator( item, label=None,shuffle=False,batch_size=batch_size,mode='test'
+    test_generator = AiRushDataGenerator( item, label=None,shuffle=False,batch_size=1,mode='test'
                                              , image_feature_dict=img_features,distcnts = img_distcnts, history_distcnts=history_distcnts)
 
-    y_pred = []
-
-    for i in item:
-        y_pred.append(0.5)
-
+    y_pred =  model.predict_generator(test_generator)
+    print('y_pred.shape', y_pred.shape)
+    y_pred = y_pred.squeeze().tolist()
+    print('y_pred list len',len(y_pred))
+    #print(y_pred)
     return y_pred
-    # root : csv file path
-    #print('_infer root - : ', root)
-    #with torch.no_grad():
-    #    model.eval()
-    #    test_loader, dataset_sizes = get_data_loader(root, phase)
-    #    y_pred = []
-    #    print('start infer')
-    #    for i, data in enumerate(test_loader):
-    #        images, extracted_image_features, labels, flat_features = data
-
-    #        # images = images.cuda()
-    #        extracted_image_features = extracted_image_features.cuda()
-    #        flat_features = flat_features.cuda()
-    #        # labels = labels.cuda()
-
-    #        logits = model(extracted_image_features, flat_features)
-    #        y_pred += logits.cpu().squeeze().numpy().tolist()
-
-    #    print('end infer')
-    #return y_pred
 
 def build_model(input_feature_num):
     inp = Input(shape=(input_feature_num,))
@@ -179,7 +159,10 @@ class report_nsml(keras.callbacks.Callback):
 
 def main(args):   
     search_file(DATASET_PATH)
-    feature_ext_model = build_cnn_model()
+    if args.mode == 'train':
+        feature_ext_model = build_cnn_model()
+    else:
+        feature_ext_model = build_cnn_model(use_imagenet=None)
     model = build_model(2600)
     print('feature_ext_model.output.shape[1]',feature_ext_model.output.shape[1])
     if use_nsml:
@@ -207,7 +190,7 @@ def main(args):
         print(label.head())
 
 
-        debug=1*10000
+        debug=None
         if debug is not None:
             item= item[:debug]
             label = label[:debug]

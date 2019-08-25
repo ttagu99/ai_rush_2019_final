@@ -8,6 +8,7 @@ setup(
             'tqdm',
             'torch>=1.0',
             'lightgbm',
+            'efficientnet==0.0.4'
             #'pickle-mixin',
             #'torchvision',
             #'pandas>=0.24.0',
