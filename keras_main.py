@@ -54,9 +54,9 @@ DATASET_PATH = os.path.join(nsml.DATASET_PATH)
 print('start using nsml...!')
 print('DATASET_PATH: ', DATASET_PATH)
 use_nsml = True
-batch_size = 2000
+batch_size = 5000
 CNN_BACKBONE =MobileNetV2
-debug=10000#None#100000#None
+debug=None#10000#None#100000#None
 
 def bind_nsml(feature_ext_model, model, task):
     def save(dir_name):
@@ -156,10 +156,10 @@ def count_process(item, category_text):
         history_num.append(len(list_article))
     item['history_num'] = pd.Series(history_num, index=item.index)
     item['history_dupicate_top1'] = pd.Series(history_dupicate_top1, index=item.index)
-    item = pd.merge(item, category_text, how='left', on=['article_id', 'article_id'])
+    #item = pd.merge(item, category_text, how='left', on=['article_id', 'article_id'])
 
-    category_text = category_text.rename(columns={"category_id": "history_category_id"})
-    item = pd.merge(item, category_text, how='left', on=['history_dupicate_top1', 'article_id'])
+    #category_text = category_text.rename(columns={"category_id": "history_category_id"})
+    #item = pd.merge(item, category_text, how='left', on=['history_dupicate_top1', 'article_id'])
 
     return item,article_list,total_list_article
 
@@ -282,7 +282,9 @@ def main(args):
 
 
         metrics=['accuracy',f1_score]
-        model.compile(loss=f1_loss, optimizer='adam', metrics=metrics)
+
+        opt = Adam(lr=0.0001)
+        model.compile(loss=f1_loss, optimizer=opt, metrics=metrics)
         model.summary()
 
         """ Callback """
@@ -296,7 +298,7 @@ def main(args):
         callbacks = [reduce_lr,early_stop,report]
 
         # Train model on dataset
-        model.fit_generator(generator=training_generator,   epochs=100, #class_weight=class_weights,
+        model.fit_generator(generator=training_generator,steps_per_epoch=300,   epochs=10000, #class_weight=class_weights,
                             validation_data=validation_generator,
                             use_multiprocessing=True,
                             workers=4, callbacks=callbacks)
