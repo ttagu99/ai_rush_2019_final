@@ -160,7 +160,7 @@ class AiRushDataGenerator(keras.utils.Sequence):
         return X, y
 
     def __data_generation(self, idxs):
-        X = np.empty((self.batch_size, 2600))
+        X = np.empty((self.batch_size, 2657))
         y = np.empty((self.batch_size), dtype=int)
         # Generate data
         for i, idx in enumerate(idxs):
@@ -170,8 +170,8 @@ class AiRushDataGenerator(keras.utils.Sequence):
 
     
     def get_one_data(self, idx):
-        article_id, hh, gender, age_range, read_article_ids,history_num,history_dupicate_top1  = self.item.loc[idx
-                       , ['article_id', 'hh', 'gender', 'age_range', 'read_article_ids','history_num','history_dupicate_top1']]
+        article_id, hh, gender, age_range, read_article_ids,history_num,history_dupicate_top1, category_id,history_category_id,check_category  = self.item.loc[idx
+                       , ['article_id', 'hh', 'gender', 'age_range', 'read_article_ids','history_num','history_dupicate_top1','category_id','history_category_id','check_category']]
 
         if self.mode== 'train' or self.mode=='valid':
             label = self.label.loc[idx,['label']]
@@ -194,8 +194,18 @@ class AiRushDataGenerator(keras.utils.Sequence):
         label_onehot = np.zeros((24), dtype=np.float32)
         label_onehot[time - 1] = 1
         flat_features.extend(label_onehot)
-        flat_features.append(history_num) #history number add
 
+        label_onehot = np.zeros((28), dtype=np.float32)
+        label_onehot[category_id] = 1
+        flat_features.extend(label_onehot)
+
+        label_onehot = np.zeros((28), dtype=np.float32)
+        label_onehot[history_category_id] = 1
+        flat_features.extend(label_onehot)
+        flat_features.append(check_category)
+        #print('flat_features',flat_features)
+
+        flat_features.append(history_num) #history number add
         flat_features.append(self.distcnts[article_id]) #base article이 base aritcle set에는 몇개나?
 
         try:

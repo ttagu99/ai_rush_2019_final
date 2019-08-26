@@ -56,7 +56,7 @@ print('DATASET_PATH: ', DATASET_PATH)
 use_nsml = True
 batch_size = 5000
 CNN_BACKBONE =MobileNetV2
-debug=None#10000#None#100000#None
+debug=None#10000#None#10000#None#100000#None
 
 def bind_nsml(feature_ext_model, model, task):
     def save(dir_name):
@@ -90,8 +90,19 @@ def _infer(root, phase, model, task, feature_ext_model):
 
     print('item.shap', item.shape)
     print(item.head(10))
+    category_text_file = os.path.join(root, 'test', 'test_data', 'test_data_article.tsv') 
+    category_text = pd.read_csv(category_text_file,
+                            dtype={
+                                'article_id': str,
+                                'category_id': int,
+                                'title': str
+                            }, sep='\t')
+    print('category_text.shape', category_text.shape)
+    print(category_text.head())
 
-    item,article_list,total_list_article = count_process(item)
+    category_text = category_text[['article_id','category_id']]
+
+    item,article_list,total_list_article = count_process(item, category_text)
 
     #only test set's article
     img_features, img_distcnts = make_features_and_distcnt(os.path.join(DATASET_PATH, 'test', 'test_data', 'test_image'),feature_ext_model
@@ -156,10 +167,30 @@ def count_process(item, category_text):
         history_num.append(len(list_article))
     item['history_num'] = pd.Series(history_num, index=item.index)
     item['history_dupicate_top1'] = pd.Series(history_dupicate_top1, index=item.index)
-    #item = pd.merge(item, category_text, how='left', on=['article_id', 'article_id'])
+    item = pd.merge(item, category_text, how='left', on='article_id')
+    print('merge item, category_tex')
+    print(item.head())
 
-    #category_text = category_text.rename(columns={"category_id": "history_category_id"})
-    #item = pd.merge(item, category_text, how='left', on=['history_dupicate_top1', 'article_id'])
+    category_text = category_text.rename(columns={"article_id": "context_article_id", "category_id": "history_category_id"})
+    print('after rename category_text')
+    print(category_text.head())
+    item = pd.merge(item, category_text, how='left', left_on='history_dupicate_top1' , right_on= 'context_article_id')
+    item = item.drop(columns=['context_article_id'])
+    item['category_id'] =item['category_id'].fillna(value=0).astype(np.uint8)
+    item['history_category_id'] =item['history_category_id'].fillna(value=0).astype(np.uint8)
+
+    check_category = []
+    cat_list = item['category_id'].tolist()
+    hist_cat_list = item['history_category_id'] .tolist()
+    for i in range(len(cat_list)):
+        if cat_list[i] ==0 or hist_cat_list[i] ==0:
+            check_category.append(0)
+        elif cat_list[i] == hist_cat_list[i]:
+            check_category.append(1)
+        else:
+            check_category.append(-1)
+
+    item['check_category'] = check_category
 
     return item,article_list,total_list_article
 
@@ -211,7 +242,10 @@ def main(args):
         feature_ext_model = build_cnn_model(backbone=CNN_BACKBONE)
     else:
         feature_ext_model = build_cnn_model(backbone=CNN_BACKBONE,use_imagenet=None)
-    model = build_model(2600)
+
+    in_feature_num = 97 + feature_ext_model.output.shape[1]*2
+    print( 'in_feature_num',in_feature_num)
+    model = build_model(2657)
     print('feature_ext_model.output.shape[1]',feature_ext_model.output.shape[1])
     if use_nsml:
         bind_nsml(feature_ext_model, model, args.task)
