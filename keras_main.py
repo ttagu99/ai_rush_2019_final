@@ -27,8 +27,10 @@ from keras.applications.inception_resnet_v2 import InceptionResNetV2
 from efficientnet import EfficientNetB0
 from keras.models import Model,load_model
 from keras.optimizers import Adam, SGD
+from keras.layers import Add,Multiply
 from sklearn.model_selection import train_test_split
 from sklearn.utils import class_weight
+from tensorflow.python.keras import layers
 from nsml import DATASET_PATH, DATASET_NAME, NSML_NFS_OUTPUT, SESSION_NAME
 #import imgaug as ia
 #from imgaug import augmenters as iaa
@@ -120,15 +122,23 @@ def _infer(root, phase, model, task, feature_ext_model):
     #print(y_pred)
     return y_pred
 
+def identity_block_1d(input_tensor, unit_num, drop_p=0.5):
+    x = BatchNormalization()(input_tensor)
+    x = Dense(unit_num, activation="relu")(x)
+    x = Dropout(drop_p)(x)
+    x = Add()([x, input_tensor])
+    x = Activation('relu')(x)
+    return x
+
 def build_model(input_feature_num):
     inp = Input(shape=(input_feature_num,))
     x = BatchNormalization(name = 'batchnormal_in')(inp)
-    x = Dense(512, activation="relu")(inp)
-    x = Dropout(0.5)(x)
-    x = BatchNormalization()(x)
     x = Dense(512, activation="relu")(x)
-    x = Dropout(0.5)(x)
-    x = Dense(512, activation="relu")(x)
+    x = identity_block_1d(x,unit_num=512,drop_p=0.5)
+    x = identity_block_1d(x,unit_num=512,drop_p=0.5)
+    x = identity_block_1d(x,unit_num=512,drop_p=0.5)
+    x = identity_block_1d(x,unit_num=512,drop_p=0.5)
+    x = identity_block_1d(x,unit_num=512,drop_p=0.5)
     x = Dense(1, activation="sigmoid")(x)
     model = Model(inputs=inp, outputs=x)
     return model
@@ -301,7 +311,7 @@ def main(args):
     else:
         feature_ext_model = build_cnn_model(backbone=CNN_BACKBONE,use_imagenet=None)
 
-    in_feature_num = int(97 +84 + 3+ feature_ext_model.output.shape[1]*2)
+    in_feature_num = int(97 +84 + 9+ feature_ext_model.output.shape[1]*2)
     print( 'in_feature_num',in_feature_num)
     model = build_model(in_feature_num)
     print('feature_ext_model.output.shape[1]',feature_ext_model.output.shape[1])

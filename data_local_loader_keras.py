@@ -42,7 +42,7 @@ def build_cnn_model(backbone= MobileNetV2, input_shape =  (224,224,3), use_image
             layer.trainable = False
     #model.compile(loss='categorical_crossentropy',   optimizer=opt,  metrics=['accuracy'])
     print('build_cnn_model')
-    model.summary()
+    #model.summary()
     return model
 
 def merge_list(image_list):
@@ -171,8 +171,10 @@ class AiRushDataGenerator(keras.utils.Sequence):
 
     
     def get_one_data(self, idx):
-        article_id, hh, gender, age_range, read_article_ids,history_num,history_dupicate_top1, category_id,history_category_id,check_category, history_left1_category, history_left2_category, history_left3_category ,check_left1, check_left2, check_left3= self.item.loc[idx
-                       , ['article_id', 'hh', 'gender', 'age_range', 'read_article_ids','history_num','history_dupicate_top1','category_id','history_category_id','check_category','history_left1_category', 'history_left2_category', 'history_left3_category'
+        article_id, hh, gender, age_range, read_article_ids,history_num,history_dupicate_top1,history_left1,history_left2,history_left3, category_id,history_category_id,check_category, history_left1_category, history_left2_category, history_left3_category ,check_left1, check_left2, check_left3= self.item.loc[idx
+                       , ['article_id', 'hh', 'gender', 'age_range', 'read_article_ids','history_num','history_dupicate_top1'
+                          ,'history_left1','history_left2','history_left3'
+                          ,'category_id','history_category_id','check_category','history_left1_category', 'history_left2_category', 'history_left3_category'
                           ,'check_left1', 'check_left2', 'check_left3']]
 
 
@@ -223,22 +225,48 @@ class AiRushDataGenerator(keras.utils.Sequence):
         flat_features.extend(label_onehot)
         #print('flat_features',flat_features)
 
-        flat_features.append(history_num) #history number add
-        flat_features.append(self.distcnts[article_id]) #base article이 base aritcle set에는 몇개나?
+        flat_features.append(history_num/self.item.shape[0]) #history number add
+        flat_features.append(self.distcnts[article_id]/self.item.shape[0]) #base article이 base aritcle set에는 몇개나?
 
         try:
-            flat_features.append(self.history_distcnts[article_id]) #base article이 history article에는 몇개나?
+            flat_features.append(self.history_distcnts[article_id]/self.item.shape[0]) #base article이 history article에는 몇개나?
         except:
             flat_features.append(0)
 
         try:
-            flat_features.append(self.history_distcnts[history_dupicate_top1]) #history article이 history article set에는 몇개나?
+            flat_features.append(self.history_distcnts[history_dupicate_top1]/self.item.shape[0]) #history article이 history article set에는 몇개나?
         except:
             flat_features.append(0)
         try:
-            flat_features.append(self.distcnts[history_dupicate_top1]) #history article이 base set article에는 몇개나?
+            flat_features.append(self.distcnts[history_dupicate_top1]/self.item.shape[0]) #history article이 base set article에는 몇개나?
         except:
             flat_features.append(0)
+
+        try:
+            flat_features.append(self.history_distcnts[history_left1]/self.item.shape[0]) #history article이 history article set에는 몇개나?
+        except:
+            flat_features.append(0)
+        try:
+            flat_features.append(self.distcnts[history_left1]/self.item.shape[0]) #history article이 base set article에는 몇개나?
+        except:
+            flat_features.append(0)
+        try:
+            flat_features.append(self.history_distcnts[history_left2]/self.item.shape[0]) #history article이 history article set에는 몇개나?
+        except:
+            flat_features.append(0)
+        try:
+            flat_features.append(self.distcnts[history_left2]/self.item.shape[0]) #history article이 base set article에는 몇개나?
+        except:
+            flat_features.append(0)
+        try:
+            flat_features.append(self.history_distcnts[history_left3]/self.item.shape[0]) #history article이 history article set에는 몇개나?
+        except:
+            flat_features.append(0)
+        try:
+            flat_features.append(self.distcnts[history_left3]/self.item.shape[0]) #history article이 base set article에는 몇개나?
+        except:
+            flat_features.append(0)
+
 
         if history_dupicate_top1 == "NoDup":
             history_feature = np.zeros(extracted_image_feature.shape) #history article의 feature 이미지가 없음..
