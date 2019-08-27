@@ -122,12 +122,13 @@ class AiRushDataGenerator(keras.utils.Sequence):
     def __init__(self,  item, label=None,
                  transform=None,shuffle=False,batch_size=200,mode='train' #, features_model=None
                  , image_feature_dict=None, distcnts=None, history_distcnts = None
-                 ):
+                 ,featurenum=1000):
 
         self.batch_size = batch_size
         self.shuffle = shuffle
         self.label = label
         self.item = item
+        self.featurenum = featurenum
         self.indexes = self.item.index.values.tolist()
         #self.n = 0
         #self.max = self.item.shape[0]//self.batch_size
@@ -160,7 +161,7 @@ class AiRushDataGenerator(keras.utils.Sequence):
         return X, y
 
     def __data_generation(self, idxs):
-        X = np.empty((self.batch_size, 2657))
+        X = np.empty((self.batch_size, self.featurenum))
         y = np.empty((self.batch_size), dtype=int)
         # Generate data
         for i, idx in enumerate(idxs):
@@ -170,8 +171,10 @@ class AiRushDataGenerator(keras.utils.Sequence):
 
     
     def get_one_data(self, idx):
-        article_id, hh, gender, age_range, read_article_ids,history_num,history_dupicate_top1, category_id,history_category_id,check_category  = self.item.loc[idx
-                       , ['article_id', 'hh', 'gender', 'age_range', 'read_article_ids','history_num','history_dupicate_top1','category_id','history_category_id','check_category']]
+        article_id, hh, gender, age_range, read_article_ids,history_num,history_dupicate_top1, category_id,history_category_id,check_category, history_left1_category, history_left2_category, history_left3_category ,check_left1, check_left2, check_left3= self.item.loc[idx
+                       , ['article_id', 'hh', 'gender', 'age_range', 'read_article_ids','history_num','history_dupicate_top1','category_id','history_category_id','check_category','history_left1_category', 'history_left2_category', 'history_left3_category'
+                          ,'check_left1', 'check_left2', 'check_left3']]
+
 
         if self.mode== 'train' or self.mode=='valid':
             label = self.label.loc[idx,['label']]
@@ -202,7 +205,22 @@ class AiRushDataGenerator(keras.utils.Sequence):
         label_onehot = np.zeros((28), dtype=np.float32)
         label_onehot[history_category_id] = 1
         flat_features.extend(label_onehot)
-        flat_features.append(check_category)
+        flat_features.append(check_category) 
+
+        flat_features.append(check_left1) 
+        flat_features.append(check_left2) 
+        flat_features.append(check_left3) 
+     
+        #history_left1_category, history_left2_category, history_left3_category
+        label_onehot = np.zeros((28), dtype=np.float32)
+        label_onehot[history_left1_category] = 1
+        flat_features.extend(label_onehot)
+        label_onehot = np.zeros((28), dtype=np.float32)
+        label_onehot[history_left2_category] = 1
+        flat_features.extend(label_onehot)       
+        label_onehot = np.zeros((28), dtype=np.float32)
+        label_onehot[history_left3_category] = 1
+        flat_features.extend(label_onehot)
         #print('flat_features',flat_features)
 
         flat_features.append(history_num) #history number add

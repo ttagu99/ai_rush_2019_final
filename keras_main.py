@@ -54,9 +54,9 @@ DATASET_PATH = os.path.join(nsml.DATASET_PATH)
 print('start using nsml...!')
 print('DATASET_PATH: ', DATASET_PATH)
 use_nsml = True
-batch_size = 5000
+batch_size = 2000
 CNN_BACKBONE =MobileNetV2
-debug=None#10000#None#10000#None#100000#None
+debug=10000*40#None#10000#None#100000#None
 
 def bind_nsml(feature_ext_model, model, task):
     def save(dir_name):
@@ -140,6 +140,14 @@ def search_file(search_path):
             for file in files:
                 print(file)
 
+def check_history_func(cat, hist):
+    if cat ==0 or hist ==0:
+        return 0
+    elif cat == hist:
+        return 1
+    else:
+        return -1
+
 def count_process(item, category_text):
     article_list = item['article_id'].values.tolist()
     rm_dup_artilcle = list(set(article_list))
@@ -148,6 +156,10 @@ def count_process(item, category_text):
     history_dupicate_top1=[]
     history_num = []
     log_num = 10000*10
+    
+    history_left1=[]
+    history_left2=[]
+    history_left3=[]
     for cnt, idx in enumerate(item.index.to_list()):
         if(cnt%log_num==0):
             print('count process',cnt, '/',item.shape[0])
@@ -155,43 +167,89 @@ def count_process(item, category_text):
         hist_top = "NoDup"
         if type(cur_article) == str:
             list_article = cur_article.split(',')
+            if len(list_article)>=3:
+                history_left3.append(list_article[2])
+                history_left2.append(list_article[1])
+                history_left1.append(list_article[0])
+            elif len(list_article)==2:
+                history_left3.append("")
+                history_left2.append(list_article[1])
+                history_left1.append(list_article[0])
+            else:
+                history_left3.append("")
+                history_left2.append("")
+                history_left1.append(list_article[0])
+
             total_list_article.extend(list_article)    
             for hist_article in list_article:  # so long~
                 if hist_article in rm_dup_artilcle:
                     hist_top = hist_article
                     break
         else:
+            history_left3.append("")
+            history_left2.append("")
+            history_left1.append("")
             list_article = []
         history_dupicate_top1.append(hist_top)
 
         history_num.append(len(list_article))
     item['history_num'] = pd.Series(history_num, index=item.index)
+    #이미지 feature가 있는 history 1개
     item['history_dupicate_top1'] = pd.Series(history_dupicate_top1, index=item.index)
-    item = pd.merge(item, category_text, how='left', on='article_id')
-    print('merge item, category_tex')
-    print(item.head())
+    ## 이미지 feature가 없는 history의 category top 2~3개 추가    
+    if len(history_left1)!= len(history_left2) or  len(history_left1)!= len(history_left3):
+        print('wrong history len',len(history_left1),len(history_left2),len(history_left3))
 
+    item['history_left1'] = pd.Series(history_left1, index=item.index)
+    item['history_left2'] = pd.Series(history_left2, index=item.index)
+    item['history_left3'] = pd.Series(history_left3, index=item.index)
+    
+    item = pd.merge(item, category_text, how='left', on='article_id')
+    print('merge item, category_text')
+    print(item.head())
     category_text = category_text.rename(columns={"article_id": "context_article_id", "category_id": "history_category_id"})
     print('after rename category_text')
     print(category_text.head())
     item = pd.merge(item, category_text, how='left', left_on='history_dupicate_top1' , right_on= 'context_article_id')
     item = item.drop(columns=['context_article_id'])
+
+    category_text = category_text.rename(columns={"history_category_id": "history_left1_category"})
+    item = pd.merge(item, category_text, how='left', left_on='history_left1' , right_on= 'context_article_id')
+    item = item.drop(columns=['context_article_id'])
+    category_text = category_text.rename(columns={"history_left1_category": "history_left2_category"})
+    item = pd.merge(item, category_text, how='left', left_on='history_left2' , right_on= 'context_article_id')
+    item = item.drop(columns=['context_article_id'])
+    category_text = category_text.rename(columns={"history_left2_category": "history_left3_category"})
+    item = pd.merge(item, category_text, how='left', left_on='history_left3' , right_on= 'context_article_id')
+    item = item.drop(columns=['context_article_id'])
+
     item['category_id'] =item['category_id'].fillna(value=0).astype(np.uint8)
     item['history_category_id'] =item['history_category_id'].fillna(value=0).astype(np.uint8)
+    item['history_left1_category'] =item['history_left1_category'].fillna(value=0).astype(np.uint8)
+    item['history_left2_category'] =item['history_left2_category'].fillna(value=0).astype(np.uint8)
+    item['history_left3_category'] =item['history_left3_category'].fillna(value=0).astype(np.uint8)
+    print('add history left category----------------------------------------------------------------------')
+    print(item.head())
 
     check_category = []
+    check_left1=[]
+    check_left2=[]
+    check_left3=[]
     cat_list = item['category_id'].tolist()
     hist_cat_list = item['history_category_id'] .tolist()
+    hist_left1_list =item['history_left1_category'].tolist()
+    hist_left2_list =item['history_left2_category'].tolist() 
+    hist_left3_list =item['history_left3_category'].tolist() 
     for i in range(len(cat_list)):
-        if cat_list[i] ==0 or hist_cat_list[i] ==0:
-            check_category.append(0)
-        elif cat_list[i] == hist_cat_list[i]:
-            check_category.append(1)
-        else:
-            check_category.append(-1)
+        check_category.append(check_history_func(cat_list[i], hist_cat_list[i]))
+        check_left1.append(check_history_func(cat_list[i], hist_left1_list[i]))
+        check_left2.append(check_history_func(cat_list[i], hist_left3_list[i]))
+        check_left3.append(check_history_func(cat_list[i], hist_left3_list[i]))
 
     item['check_category'] = check_category
-
+    item['check_left1'] = check_left1
+    item['check_left2'] = check_left2
+    item['check_left3'] = check_left3
     return item,article_list,total_list_article
 
 def f1_score(y_true, y_pred):
@@ -243,9 +301,9 @@ def main(args):
     else:
         feature_ext_model = build_cnn_model(backbone=CNN_BACKBONE,use_imagenet=None)
 
-    in_feature_num = 97 + feature_ext_model.output.shape[1]*2
+    in_feature_num = int(97 +84 + 3+ feature_ext_model.output.shape[1]*2)
     print( 'in_feature_num',in_feature_num)
-    model = build_model(2657)
+    model = build_model(in_feature_num)
     print('feature_ext_model.output.shape[1]',feature_ext_model.output.shape[1])
     if use_nsml:
         bind_nsml(feature_ext_model, model, args.task)
@@ -310,14 +368,16 @@ def main(args):
         # Generators
         #root=os.path.join(DATASET_PATH, 'train', 'train_data', 'train_image')
         training_generator = AiRushDataGenerator( train_df, label=train_dfy,shuffle=True,batch_size=batch_size,mode='train'
-                                                 , image_feature_dict=img_features,distcnts = img_distcnts, history_distcnts=history_distcnts)
+                                                 , image_feature_dict=img_features,distcnts = img_distcnts, history_distcnts=history_distcnts
+                                                 ,featurenum=in_feature_num)
         validation_generator = AiRushDataGenerator( valid_df, label=valid_dfy,shuffle=False,batch_size=batch_size//20,mode='valid'
-                                                  ,image_feature_dict=img_features,distcnts = img_distcnts,history_distcnts=history_distcnts)
+                                                  ,image_feature_dict=img_features,distcnts = img_distcnts,history_distcnts=history_distcnts
+                                                  ,featurenum=in_feature_num)
 
 
         metrics=['accuracy',f1_score]
 
-        opt = Adam(lr=0.0001)
+        opt = Adam(lr=0.001)
         model.compile(loss=f1_loss, optimizer=opt, metrics=metrics)
         model.summary()
 
@@ -332,7 +392,7 @@ def main(args):
         callbacks = [reduce_lr,early_stop,report]
 
         # Train model on dataset
-        model.fit_generator(generator=training_generator,steps_per_epoch=300,   epochs=10000, #class_weight=class_weights,
+        model.fit_generator(generator=training_generator,steps_per_epoch=100,   epochs=10000, #class_weight=class_weights,
                             validation_data=validation_generator,
                             use_multiprocessing=True,
                             workers=4, callbacks=callbacks)
