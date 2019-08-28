@@ -24,22 +24,28 @@ from keras.applications.resnet50 import ResNet50
 from keras.applications.nasnet import NASNetLarge
 from keras.applications.mobilenetv2 import MobileNetV2
 from keras.applications.inception_resnet_v2 import InceptionResNetV2
-from efficientnet import EfficientNetB0, EfficientNetB2 ,EfficientNetB3, EfficientNetB4
+from efficientnet import EfficientNetB0
 from keras.models import Model,load_model
 from keras.optimizers import Adam, SGD
-from keras import optimizers
-from keras.layers import Add,Multiply,LeakyReLU
+from keras.layers import Add,Multiply
 from sklearn.model_selection import train_test_split
 from sklearn.utils import class_weight
 from tensorflow.python.keras import layers
-
-from keras import losses
 from nsml import DATASET_PATH, DATASET_NAME, NSML_NFS_OUTPUT, SESSION_NAME
 #import imgaug as ia
 #from imgaug import augmenters as iaa
 #import lightgbm as lgb
-#from sklearn.externals import joblib
-#from lightgbm import LGBMClassifier
+from sklearn.externals import joblib
+import lightgbm as lgb
+import gc
+from lightgbm import LGBMClassifier
+from sklearn.metrics import f1_score as f1_score_sk
+from keras_main import count_process
+
+def lgb_f1_score(y_hat, data):
+    y_true = data.get_label()
+    y_hat = np.round(y_hat) # scikits f1 doesn't like probabilities
+    return 'f1', f1_score(y_true, y_hat), True
 ## sklearn tools for model training and assesment
 #from sklearn.model_selection import GridSearchCV
 
@@ -59,32 +65,37 @@ DATASET_PATH = os.path.join(nsml.DATASET_PATH)
 print('start using nsml...!')
 print('DATASET_PATH: ', DATASET_PATH)
 use_nsml = True
-batch_size = 2000
-CNN_BACKBONE =EfficientNetB3
-debug=15*10000#50*10000#None#None#10000#None#100000#None
-balancing = False
-use_history_image_f = True
+#batch_size = 250000
+CNN_BACKBONE =MobileNetV2
+debug=200*10000#None#10000#None#100000#None
+use_image_feature= True
+#if use_image_feature == False:
+#    debug=None
+balancing = True
 
-def bind_nsml(feature_ext_model, model, task):
+def bind_nsml(cnn_model,gbm_model, task):
     def save(dir_name):
         os.makedirs(dir_name, exist_ok=True)
-        feature_ext_model.save_weights(os.path.join(dir_name, 'feature_ext_model.h5'))
-        model.save_weights(os.path.join(dir_name, 'model.h5'))
-        print('model saved!')
+        cnn_model.save_weights(os.path.join(dir_name, 'cnn_model.h5'))
+        print('cnn_model saved!', os.path.join(dir_name, 'cnn_model.h5'))
+        joblib.dump(gbm_model,  os.path.join(dir_name, 'gbm_model.pkl'))
+        print('gbm_model saved!', os.path.join(dir_name, 'gbm_model.pkl'))
 
     def load(dir_name):
-        feature_ext_model.load_weights(os.path.join(dir_name, 'feature_ext_model.h5'))
-        model.load_weights(os.path.join(dir_name, 'model.h5'))
-        print('model loaded!')
+        cnn_model.load_weights(os.path.join(dir_name, 'cnn_model.h5'))
+        print('cnn_model loaded!', os.path.join(dir_name, 'cnn_model.h5'))
+        gbm_model = joblib.load( os.path.join(dir_name, 'gbm_model.pkl'))
+        print('gbm_model loaded!',  os.path.join(dir_name, 'gbm_model.pkl'))
+        print('loaded model checkpoints...!')
 
     def infer(root, phase):
-        return _infer(root, phase, model=model, task=task, feature_ext_model = feature_ext_model)
+        return _infer(root, phase, gbm_model=gbm_model, task=task, feature_ext_model = cnn_model)
 
     nsml.bind(save=save, load=load, infer=infer)
-    print('bind_nsml(model)')
+    print('bind_nsml(cnn_model,gbm_model)')
 
 
-def _infer(root, phase, model, task, feature_ext_model):
+def _infer(root, phase, gbm_model, task, feature_ext_model):
     print('_infer root - : ', root)
     csv_file = os.path.join(root, 'test', 'test_data', 'test_data')
     item = pd.read_csv(csv_file,
@@ -110,11 +121,10 @@ def _infer(root, phase, model, task, feature_ext_model):
     category_text = category_text[['article_id','category_id']]
 
     item,article_list,total_list_article = count_process(item, category_text)
-
-    if use_history_image_f==True:
-        in_feature_num = int(97 +84 + 9+ feature_ext_model.output.shape[1]*2)
+    if use_image_feature==True:
+       in_feature_num = int(97 +84 + 9+ feature_ext_model.output.shape[1]*2)
     else:
-        in_feature_num = int(97 +84 + 9+ feature_ext_model.output.shape[1])
+       in_feature_num = int(97 +84 + 9)
 
     #only test set's article
     img_features, img_distcnts = make_features_and_distcnt(os.path.join(DATASET_PATH, 'test', 'test_data', 'test_image'),feature_ext_model
@@ -122,23 +132,25 @@ def _infer(root, phase, model, task, feature_ext_model):
     #only test history cnts
     history_distcnts = make_history_distcnt(total_list_article, 'history_distr_cnt.pkl')
 
-    test_generator = AiRushDataGenerator( item, label=None,shuffle=False,batch_size=1,mode='test'
+    test_generator = AiRushDataGenerator( item, label=None,shuffle=False,batch_size=item.shape[0],mode='test'
                                              , image_feature_dict=img_features,distcnts = img_distcnts, history_distcnts=history_distcnts
-                                             ,featurenum=in_feature_num,use_image_feature=True , use_history_image_f = use_history_image_f)
+                                             ,featurenum=in_feature_num,use_image_feature=use_image_feature)
 
-    y_pred =  model.predict_generator(test_generator)
+    X, y = test_generator.__getitem__(0) 
+    print('X.shape', X.shape)
+    y_pred = gbm_model.predict(X)
+    #y_pred =  model.predict_generator(test_generator)
     print('y_pred.shape', y_pred.shape)
     y_pred = y_pred.squeeze().tolist()
     print('y_pred list len',len(y_pred))
-    #print(y_pred)
     return y_pred
 
 def identity_block_1d(input_tensor, unit_num, drop_p=0.5):
     x = BatchNormalization()(input_tensor)
-    x = Dense(unit_num, activation=LeakyReLU(0.2))(x)
+    x = Dense(unit_num, activation="relu")(x)
     x = Dropout(drop_p)(x)
     x = Add()([x, input_tensor])
-    x = LeakyReLU(0.2)(x)
+    x = Activation('relu')(x)
     return x
 
 def attention_block(input_tensor,unit_num):
@@ -147,22 +159,6 @@ def attention_block(input_tensor,unit_num):
     return attention_mul
 
 
-def build_model(input_feature_num):
-    inp = Input(shape=(input_feature_num,))
-    x = BatchNormalization(name = 'batchnormal_in')(inp)
-    x = attention_block(x,unit_num=input_feature_num)
-    unit_num = 512
-    x = Dense(unit_num, activation=LeakyReLU(0.2))(x)
-    x = identity_block_1d(x,unit_num=unit_num,drop_p=0.5)
-    x = identity_block_1d(x,unit_num=unit_num,drop_p=0.5)
-    x = identity_block_1d(x,unit_num=unit_num,drop_p=0.5)
-    x = identity_block_1d(x,unit_num=unit_num,drop_p=0.5)
-    x = identity_block_1d(x,unit_num=unit_num,drop_p=0.5)
-    x = identity_block_1d(x,unit_num=unit_num,drop_p=0.5)
-    x = identity_block_1d(x,unit_num=unit_num,drop_p=0.5)
-    x = Dense(1, activation="sigmoid")(x)
-    model = Model(inputs=inp, outputs=x)
-    return model
 
 
 def search_file(search_path):
@@ -179,114 +175,6 @@ def check_history_func(cat, hist):
         return 1
     else:
         return -1
-
-def count_process(item, category_text):
-    article_list = item['article_id'].values.tolist()
-    rm_dup_artilcle = list(set(article_list))
-    history_sel_num = 1
-    total_list_article=[]
-    history_dupicate_top1=[]
-    history_num = []
-    log_num = 10000*10
-    
-    history_left1=[]
-    history_left2=[]
-    history_left3=[]
-    for cnt, idx in enumerate(item.index.to_list()):
-        if(cnt%log_num==0):
-            print('count process',cnt, '/',item.shape[0])
-        cur_article = item['read_article_ids'].loc[idx]
-        hist_top = "NoDup"
-        if type(cur_article) == str:
-            list_article = cur_article.split(',')
-            if len(list_article)>=3:
-                history_left3.append(list_article[2])
-                history_left2.append(list_article[1])
-                history_left1.append(list_article[0])
-            elif len(list_article)==2:
-                history_left3.append("")
-                history_left2.append(list_article[1])
-                history_left1.append(list_article[0])
-            else:
-                history_left3.append("")
-                history_left2.append("")
-                history_left1.append(list_article[0])
-
-            total_list_article.extend(list_article)    
-            for hist_article in list_article:  # so long~
-                if hist_article in rm_dup_artilcle:
-                    hist_top = hist_article
-                    break
-        else:
-            history_left3.append("")
-            history_left2.append("")
-            history_left1.append("")
-            list_article = []
-        history_dupicate_top1.append(hist_top)
-
-        history_num.append(len(list_article))
-    item['history_num'] = pd.Series(history_num, index=item.index)
-    #이미지 feature가 있는 history 1개
-    item['history_dupicate_top1'] = pd.Series(history_dupicate_top1, index=item.index)
-    ## 이미지 feature가 없는 history의 category top 2~3개 추가    
-    if len(history_left1)!= len(history_left2) or  len(history_left1)!= len(history_left3):
-        print('wrong history len',len(history_left1),len(history_left2),len(history_left3))
-
-    item['history_left1'] = pd.Series(history_left1, index=item.index)
-    item['history_left2'] = pd.Series(history_left2, index=item.index)
-    item['history_left3'] = pd.Series(history_left3, index=item.index)
-    
-    print('pre check index item--------------------------------------------')
-    print(item.head())
-    item = pd.merge(item, category_text, how='left', on='article_id').set_index(item.index)
-    
-    
-    print('merge item, category_text')
-    print(item.head())
-    category_text = category_text.rename(columns={"article_id": "context_article_id", "category_id": "history_category_id"})
-    print('after rename category_text')
-    print(category_text.head())
-    item = pd.merge(item, category_text, how='left', left_on='history_dupicate_top1' , right_on= 'context_article_id').set_index(item.index)
-    item = item.drop(columns=['context_article_id'])
-
-    category_text = category_text.rename(columns={"history_category_id": "history_left1_category"})
-    item = pd.merge(item, category_text, how='left', left_on='history_left1' , right_on= 'context_article_id').set_index(item.index)
-    item = item.drop(columns=['context_article_id'])
-    category_text = category_text.rename(columns={"history_left1_category": "history_left2_category"})
-    item = pd.merge(item, category_text, how='left', left_on='history_left2' , right_on= 'context_article_id').set_index(item.index)
-    item = item.drop(columns=['context_article_id'])
-    category_text = category_text.rename(columns={"history_left2_category": "history_left3_category"})
-    item = pd.merge(item, category_text, how='left', left_on='history_left3' , right_on= 'context_article_id').set_index(item.index)
-    item = item.drop(columns=['context_article_id'])
-
-    item['category_id'] =item['category_id'].fillna(value=0).astype(np.uint8)
-    item['history_category_id'] =item['history_category_id'].fillna(value=0).astype(np.uint8)
-    item['history_left1_category'] =item['history_left1_category'].fillna(value=0).astype(np.uint8)
-    item['history_left2_category'] =item['history_left2_category'].fillna(value=0).astype(np.uint8)
-    item['history_left3_category'] =item['history_left3_category'].fillna(value=0).astype(np.uint8)
-    print('add history left category----------------------------------------------------------------------')
-    print(item.head())
-
-    check_category = []
-    check_left1=[]
-    check_left2=[]
-    check_left3=[]
-    cat_list = item['category_id'].tolist()
-    hist_cat_list = item['history_category_id'] .tolist()
-    hist_left1_list =item['history_left1_category'].tolist()
-    hist_left2_list =item['history_left2_category'].tolist() 
-    hist_left3_list =item['history_left3_category'].tolist() 
-    for i in range(len(cat_list)):
-        check_category.append(check_history_func(cat_list[i], hist_cat_list[i]))
-        check_left1.append(check_history_func(cat_list[i], hist_left1_list[i]))
-        check_left2.append(check_history_func(cat_list[i], hist_left3_list[i]))
-        check_left3.append(check_history_func(cat_list[i], hist_left3_list[i]))
-
-    item['check_category'] = check_category
-    item['check_left1'] = check_left1
-    item['check_left2'] = check_left2
-    item['check_left3'] = check_left3
-    return item,article_list,total_list_article
 
 def f1_score(y_true, y_pred):
     y_pred = K.round(y_pred)
@@ -362,24 +250,80 @@ class report_nsml(keras.callbacks.Callback):
                     ,f1_score=logs.get('f1_score'),val_f1_score=logs.get('val_f1_score'))
         nsml.save(self.prefix +'_' +str(epoch))
 
+
+
 def main(args):   
     search_file(DATASET_PATH)
+
+
+    #gbm_model = lgb.LGBMClassifier()#lgb.Booster()
+    print("Initial Training the model...")
+    params = {
+        'boosting_type': 'gbdt',
+        'objective': 'binary',
+        'metric': 'binary_error',
+        'learning_rate': 0.0015,
+        'num_leaves': 255,  
+        'max_depth': -1,  
+        'min_child_samples': 1000,#1000,  
+        'max_bin': 100,  
+        'subsample': 0.8,  
+        'subsample_freq': 1,  
+        'colsample_bytree': 0.8,  
+        'min_child_weight': 0,  
+        'subsample_for_bin': 10000,#20000,  
+        'min_split_gain': 0,  
+        'reg_alpha': 0,  
+        'reg_lambda': 0,  
+        # 'nthread': 8,
+        'verbose': 0,
+        'scale_pos_weight':1
+        }
+    evals_results = {}
+    TrainX = ValidX = np.zeros((100,2))
+    TrainY = ValidY = np.zeros((100))
+    dtrain = lgb.Dataset(TrainX, label=TrainY)
+    dvalid = lgb.Dataset(ValidX,  label=ValidY)
+    gbm_model = lgb.train(params, 
+                            dtrain, 
+                            valid_sets=[dtrain, dvalid], 
+                            valid_names=['train','valid'], 
+                            evals_result=evals_results, 
+                            num_boost_round=1,
+                            early_stopping_rounds=1,
+                            verbose_eval=True, 
+                            feval=None)
+
+
     if args.mode == 'train':
         feature_ext_model = build_cnn_model(backbone=CNN_BACKBONE)
     else:
         feature_ext_model = build_cnn_model(backbone=CNN_BACKBONE,use_imagenet=None)
 
-    if use_history_image_f==True:
+    if use_image_feature==True:
         in_feature_num = int(97 +84 + 9+ feature_ext_model.output.shape[1]*2)
     else:
-        in_feature_num = int(97 +84 + 9+ feature_ext_model.output.shape[1])
+       in_feature_num = int(97 +84 + 9)
     print( 'in_feature_num',in_feature_num)
-    model = build_model(in_feature_num)
+    #model = build_model(in_feature_num)
     print('feature_ext_model.output.shape[1]',feature_ext_model.output.shape[1])
+
+    #def __init__(self, boosting_type='gbdt', num_leaves=31, max_depth=-1,
+    #             learning_rate=0.1, n_estimators=100,
+    #             subsample_for_bin=200000, objective=None, class_weight=None,
+    #             min_split_gain=0., min_child_weight=1e-3, min_child_samples=20,
+    #             subsample=1., subsample_freq=0, colsample_bytree=1.,
+    #             reg_alpha=0., reg_lambda=0., random_state=None,
+    #             n_jobs=-1, silent=True, importance_type='split', **kwargs):
+
+
+
+
     if use_nsml:
-        bind_nsml(feature_ext_model, model, args.task)
+        bind_nsml(feature_ext_model, gbm_model, args.task)
     if args.pause:
         nsml.paused(scope=locals())
+
     if args.mode == 'train':
         csv_file = os.path.join(DATASET_PATH, 'train', 'train_data', 'train_data')
         item = pd.read_csv(csv_file,
@@ -417,8 +361,6 @@ def main(args):
         print('train label csv')
         print(label.head())
 
-
-
         if debug is not None:
             item= item[:debug]
             label = label[:debug]
@@ -446,49 +388,51 @@ def main(args):
                                                                             ,article_list, 'features.pkl', 'distr_cnt.pkl')
         #only train history cnts
         history_distcnts = make_history_distcnt(total_list_article, 'history_distr_cnt.pkl')
-        train_df, valid_df, train_dfy, valid_dfy = train_test_split(item, label, test_size=0.05, random_state=888)#,stratify =label)
+        train_df, valid_df, train_dfy, valid_dfy = train_test_split(item, label, test_size=0.05, random_state=777)#,stratify =label)
         print('train_df.shape, valid_df.shape, train_dfy.shape, valid_dfy.shape'
               ,train_df.shape, valid_df.shape, train_dfy.shape, valid_dfy.shape)
         # Generators
         #root=os.path.join(DATASET_PATH, 'train', 'train_data', 'train_image')
-        training_generator = AiRushDataGenerator( train_df, label=train_dfy,shuffle=True,batch_size=batch_size,mode='train'
+        training_generator = AiRushDataGenerator( train_df, label=train_dfy,shuffle=True,batch_size=train_df.shape[0],mode='train'
                                                  , image_feature_dict=img_features,distcnts = img_distcnts, history_distcnts=history_distcnts
-                                                 ,featurenum=in_feature_num,use_image_feature=True, use_history_image_f = use_history_image_f)
-        validation_generator = AiRushDataGenerator( valid_df, label=valid_dfy,shuffle=False,batch_size=batch_size//20,mode='valid'
+                                                 ,featurenum=in_feature_num,use_image_feature=use_image_feature)
+        validation_generator = AiRushDataGenerator( valid_df, label=valid_dfy,shuffle=False,batch_size=valid_df.shape[0],mode='valid'
                                                   ,image_feature_dict=img_features,distcnts = img_distcnts,history_distcnts=history_distcnts
-                                                  ,featurenum=in_feature_num,use_image_feature=True, use_history_image_f = use_history_image_f)
+                                                  ,featurenum=in_feature_num,use_image_feature=use_image_feature)
 
         #pctr = Metrics()#next(training_generator.flow())
-        #x, y = training_generator.__getitem__(0)
-        #print(x.shape, y.shape)        
-        #print(len(test),test[0].shape,test[1].shape)
+        print('make train data')
+        TrainX, TrainY = training_generator.__getitem__(0)
+        print('make valid data')
+        ValidX, ValidY = validation_generator.__getitem__(0)
+        print('train valid shape',TrainX.shape, TrainY.shape, ValidX.shape, ValidY.shape)        
 
-        metrics=['accuracy',f1_score]#,pctr]
 
-        #opt = optimizers.SGD(lr=0.01, clipvalue=0.5)
-        opt = Adam(lr=0.001)
-        #KerasFocalLoss
-        model.compile(loss=f1_loss, optimizer=opt, metrics=metrics)
-        model.summary()
+        print("Training the model...")
+        dtrain = lgb.Dataset(TrainX, label=TrainY)
+        del TrainX
+        del TrainY
+        gc.collect()
+        dvalid = lgb.Dataset(ValidX,  label=ValidY)
+        ValidX
+        ValidY
+        gc.collect()
 
-        """ Callback """
-        monitor = 'val_f1_score'
-        best_model_path = 'dgu_model.h5'
-        reduce_lr = ReduceLROnPlateau(monitor=monitor, patience=30,factor=0.2,verbose=1,mode='max')
-        early_stop = EarlyStopping(monitor=monitor, patience=9,mode='max')
+        gbm_model = lgb.train(params, 
+                         dtrain,
+                         valid_sets=[dtrain, dvalid], 
+                         valid_names=['train','valid'], 
+                         evals_result=evals_results, 
+                         num_boost_round=5000,
+                         early_stopping_rounds=30,
+                         #feval=lgb_f1_score,
+                         verbose_eval=True)
+        validPred = gbm_model.predict(ValidX)
+        #print('f1_score_sk',f1_score_sk(ValidY,validPred))
+        print(validPred)
+        nsml.save('dgu_sample')
 
-        #checkpoint = ModelCheckpoint(best_model_path,monitor=monitor,verbose=1,save_best_only=True)
-        report = report_nsml(prefix = 'dgu')
-        callbacks = [reduce_lr,report]
-
-        # Train model on dataset
-        model.fit_generator(generator=training_generator,steps_per_epoch=100,   epochs=10000, #class_weight=class_weights,
-                            validation_data=validation_generator,
-                            use_multiprocessing=True,
-                            workers=2, callbacks=callbacks)
-    #eda_set = next(training_generator)
-    #print(len(eda_set), eda_set[0].shape, eda_set[1].shape)
-
+        
 
 
 

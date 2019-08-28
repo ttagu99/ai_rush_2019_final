@@ -28,8 +28,15 @@
     <Compile Include="data_local_loader_keras.py">
       <SubType>Code</SubType>
     </Compile>
+    <Compile Include="ensemble.py" />
+    <Compile Include="ensemble_notrain_infer.py">
+      <SubType>Code</SubType>
+    </Compile>
     <Compile Include="evaluation.py" />
     <Compile Include="gbm_main.py">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="gbm_new.py">
       <SubType>Code</SubType>
     </Compile>
     <Compile Include="keras_main.py">

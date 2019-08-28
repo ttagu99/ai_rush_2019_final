@@ -23,15 +23,16 @@ from keras.applications.resnet50 import ResNet50
 from keras.applications.nasnet import NASNetLarge
 from keras.applications.mobilenetv2 import MobileNetV2
 from keras.applications.inception_resnet_v2 import InceptionResNetV2
-from efficientnet import EfficientNetB0
+from efficientnet import EfficientNetB0, EfficientNetB3
 from keras.models import Model,load_model
 from keras.optimizers import Adam, SGD
 from sklearn.model_selection import train_test_split
 import random
 from keras.preprocessing import image
-from keras.applications.mobilenetv2 import preprocess_input
+#from keras.applications.mobilenetv2 import preprocess_input
+from efficientnet import center_crop_and_resize, preprocess_input
 
-def build_cnn_model(backbone= MobileNetV2, input_shape =  (224,224,3), use_imagenet = 'imagenet', base_freeze=True):
+def build_cnn_model(backbone= MobileNetV2, input_shape =  (256,256,3), use_imagenet = 'imagenet', base_freeze=True):
     base_model = backbone(input_shape=input_shape, weights=use_imagenet, include_top= False)#, classes=NCATS)
     x = base_model.output
     gap_x = GlobalAveragePooling2D()(x)
@@ -54,10 +55,10 @@ def merge_list(image_list):
 def extract_feature(model, image_path):
     try:
         img = pil_loader(image_path)
-        img = img.resize((224, 224))
+        img = img.resize((256, 256))
         img_data = image.img_to_array(img)
     except:
-        img_data = np.zeros((224,224,3))
+        img_data = np.zeros((256,256,3))
     img_data = np.expand_dims(img_data, axis=0)
     img_data = preprocess_input(img_data)
     feature = model.predict(img_data)
@@ -122,7 +123,7 @@ class AiRushDataGenerator(keras.utils.Sequence):
     def __init__(self,  item, label=None,
                  transform=None,shuffle=False,batch_size=200,mode='train' #, features_model=None
                  , image_feature_dict=None, distcnts=None, history_distcnts = None
-                 ,featurenum=1000):
+                 ,featurenum=1000,use_image_feature=True, use_history_image_f = False):
 
         self.batch_size = batch_size
         self.shuffle = shuffle
@@ -140,6 +141,8 @@ class AiRushDataGenerator(keras.utils.Sequence):
         self.on_epoch_end()
         self.image_feature_dict = image_feature_dict
         self.distcnts =distcnts
+        self.use_image_feature =use_image_feature
+        self.use_history_image_f = use_history_image_f
         self.history_distcnts = history_distcnts
         self.sex = {'unknown': 0, 'm': 1, 'f': 2}
         self.age = {'unknown': 0, '-14': 1, '15-19': 2, '20-24': 3, '25-29': 4,
@@ -267,15 +270,17 @@ class AiRushDataGenerator(keras.utils.Sequence):
         except:
             flat_features.append(0)
 
-
+        
         if history_dupicate_top1 == "NoDup":
             history_feature = np.zeros(extracted_image_feature.shape) #history article의 feature 이미지가 없음..
         else:
             history_feature = self.image_feature_dict[history_dupicate_top1] #history article의 feature
             
         flat_features = np.array(flat_features).flatten()
-        flat_features =np.concatenate((flat_features, extracted_image_feature), axis=None)
-        flat_features =np.concatenate((flat_features, history_feature), axis=None)
+        if self.use_image_feature ==True:
+            flat_features =np.concatenate((flat_features, extracted_image_feature), axis=None)
+            if self.use_history_image_f == True:
+                flat_features =np.concatenate((flat_features, history_feature), axis=None)
         # hint: flat features are concatened into a Tensor, because I wanted to put them all into computational model,
         # hint: if it is not what you wanted, then change the last return line
         return flat_features, label

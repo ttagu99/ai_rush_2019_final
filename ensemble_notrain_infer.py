@@ -1,3 +1,4 @@
+
 from data_local_loader_keras import AiRushDataGenerator, build_cnn_model, make_history_distcnt, make_features_and_distcnt    
 import os
 import argparse
@@ -106,9 +107,7 @@ def _infer(root, phase, model, task, feature_ext_model):
                             }, sep='\t')
     print('category_text.shape', category_text.shape)
     print(category_text.head())
-
     category_text = category_text[['article_id','category_id']]
-
     item,article_list,total_list_article = count_process(item, category_text)
 
     if use_history_image_f==True:
@@ -121,7 +120,6 @@ def _infer(root, phase, model, task, feature_ext_model):
                                                                         ,article_list, 'features.pkl', 'distr_cnt.pkl')
     #only test history cnts
     history_distcnts = make_history_distcnt(total_list_article, 'history_distr_cnt.pkl')
-
     test_generator = AiRushDataGenerator( item, label=None,shuffle=False,batch_size=1,mode='test'
                                              , image_feature_dict=img_features,distcnts = img_distcnts, history_distcnts=history_distcnts
                                              ,featurenum=in_feature_num,use_image_feature=True , use_history_image_f = use_history_image_f)
@@ -364,130 +362,37 @@ class report_nsml(keras.callbacks.Callback):
 
 def main(args):   
     search_file(DATASET_PATH)
-    if args.mode == 'train':
-        feature_ext_model = build_cnn_model(backbone=CNN_BACKBONE)
-    else:
-        feature_ext_model = build_cnn_model(backbone=CNN_BACKBONE,use_imagenet=None)
 
-    if use_history_image_f==True:
-        in_feature_num = int(97 +84 + 9+ feature_ext_model.output.shape[1]*2)
-    else:
-        in_feature_num = int(97 +84 + 9+ feature_ext_model.output.shape[1])
-    print( 'in_feature_num',in_feature_num)
-    model = build_model(in_feature_num)
-    print('feature_ext_model.output.shape[1]',feature_ext_model.output.shape[1])
+    model_list=[]
+    model1={'backbone':MobileNetV2,'input_shape':(224,224,3), 'use_history_image_f':True
+            ,'Generator':AiRushDataGenerator}
+    model229={'backbone':MobileNetV2,'input_shape':(224,224,3), 'use_history_image_f':True
+            ,'Generator':AiRushDataGenerator}
+    #model2={'backbone':}
+    model_list.append(model1)
+
+    for model_info in model_list:
+        if args.mode == 'train':
+            feature_ext_model = build_cnn_model(backbone=model_info['backbone'], input_shape=model_info['input_shape'])
+        else:
+            feature_ext_model = build_cnn_model(backbone=model_info['backbone'], input_shape=model_info['input_shape'],use_imagenet=None)
+
+        if use_history_image_f==True:
+            in_feature_num = int(97 +84 + 9+ feature_ext_model.output.shape[1]*2)
+        else:
+            in_feature_num = int(97 +84 + 9+ feature_ext_model.output.shape[1])
+
+        print( 'in_feature_num',in_feature_num)
+        model = build_model(in_feature_num)
+        print('feature_ext_model.output.shape[1]',feature_ext_model.output.shape[1])
+#개별 모델로딩
     if use_nsml:
         bind_nsml(feature_ext_model, model, args.task)
+
+#merging
+
     if args.pause:
         nsml.paused(scope=locals())
-    if args.mode == 'train':
-        csv_file = os.path.join(DATASET_PATH, 'train', 'train_data', 'train_data')
-        item = pd.read_csv(csv_file,
-                                dtype={
-                                    'article_id': str,
-                                    'hh': int, 'gender': str,
-                                    'age_range': str,
-                                    'read_article_ids': str
-                                }, sep='\t')
-        print('item.shape', item.shape)
-        print(item.head())
-        category_text_file = os.path.join(DATASET_PATH, 'train', 'train_data', 'train_data_article.tsv')
-
- 
-        category_text = pd.read_csv(category_text_file,
-                                dtype={
-                                    'article_id': str,
-                                    'category_id': int,
-                                    'title': str
-                                }, sep='\t')
-        print('category_text.shape', category_text.shape)
-        print(category_text.head())
-
-        category_text = category_text[['article_id','category_id']]
-        
-
-        print('category_id].values.max()',category_text['category_id'].values.max())
-        print('category_id].values.min()',category_text['category_id'].values.min())
-
-        label_data_path = os.path.join(DATASET_PATH, 'train',
-                                        os.path.basename(os.path.normpath(csv_file)).split('_')[0] + '_label')
-        label = pd.read_csv(label_data_path,
-                                    dtype={'label': int},
-                                    sep='\t')
-        print('train label csv')
-        print(label.head())
-
-
-
-        if debug is not None:
-            item= item[:debug]
-            label = label[:debug]
-
-        if balancing == True:
-            one_label = label[label['label']==1]
-            print(one_label.head())
-            zero_label = label[label['label']==0].sample(one_label.shape[0])
-            print(zero_label.head())
-            label = pd.concat([one_label,zero_label])
-            #print(label.index.to_list())
-            item = item.loc[label.index.to_list()]
-            print('item.shape',item.shape)
-            print(item.head())
-            print(label.head())
-
-        #class_weights = class_weight.compute_class_weight('balanced',  np.unique(label),   label)
-        #print('class_weights',class_weights)
-        item,article_list,total_list_article = count_process(item,category_text)
-        print('preprocess item.shape', item.shape)
-        print(item.head())
-        print(item.columns)
-        #only train set's article
-        img_features, img_distcnts = make_features_and_distcnt(os.path.join(DATASET_PATH, 'train', 'train_data', 'train_image'),feature_ext_model
-                                                                            ,article_list, 'features.pkl', 'distr_cnt.pkl')
-        #only train history cnts
-        history_distcnts = make_history_distcnt(total_list_article, 'history_distr_cnt.pkl')
-        train_df, valid_df, train_dfy, valid_dfy = train_test_split(item, label, test_size=0.05, random_state=888)#,stratify =label)
-        print('train_df.shape, valid_df.shape, train_dfy.shape, valid_dfy.shape'
-              ,train_df.shape, valid_df.shape, train_dfy.shape, valid_dfy.shape)
-        # Generators
-        #root=os.path.join(DATASET_PATH, 'train', 'train_data', 'train_image')
-        training_generator = AiRushDataGenerator( train_df, label=train_dfy,shuffle=True,batch_size=batch_size,mode='train'
-                                                 , image_feature_dict=img_features,distcnts = img_distcnts, history_distcnts=history_distcnts
-                                                 ,featurenum=in_feature_num,use_image_feature=True, use_history_image_f = use_history_image_f)
-        validation_generator = AiRushDataGenerator( valid_df, label=valid_dfy,shuffle=False,batch_size=batch_size//20,mode='valid'
-                                                  ,image_feature_dict=img_features,distcnts = img_distcnts,history_distcnts=history_distcnts
-                                                  ,featurenum=in_feature_num,use_image_feature=True, use_history_image_f = use_history_image_f)
-
-        #pctr = Metrics()#next(training_generator.flow())
-        #x, y = training_generator.__getitem__(0)
-        #print(x.shape, y.shape)        
-        #print(len(test),test[0].shape,test[1].shape)
-
-        metrics=['accuracy',f1_score]#,pctr]
-
-        #opt = optimizers.SGD(lr=0.01, clipvalue=0.5)
-        opt = Adam(lr=0.001)
-        #KerasFocalLoss
-        model.compile(loss=f1_loss, optimizer=opt, metrics=metrics)
-        model.summary()
-
-        """ Callback """
-        monitor = 'val_f1_score'
-        best_model_path = 'dgu_model.h5'
-        reduce_lr = ReduceLROnPlateau(monitor=monitor, patience=30,factor=0.2,verbose=1,mode='max')
-        early_stop = EarlyStopping(monitor=monitor, patience=9,mode='max')
-
-        #checkpoint = ModelCheckpoint(best_model_path,monitor=monitor,verbose=1,save_best_only=True)
-        report = report_nsml(prefix = 'dgu')
-        callbacks = [reduce_lr,report]
-
-        # Train model on dataset
-        model.fit_generator(generator=training_generator,steps_per_epoch=100,   epochs=10000, #class_weight=class_weights,
-                            validation_data=validation_generator,
-                            use_multiprocessing=True,
-                            workers=2, callbacks=callbacks)
-    #eda_set = next(training_generator)
-    #print(len(eda_set), eda_set[0].shape, eda_set[1].shape)
 
 
 
